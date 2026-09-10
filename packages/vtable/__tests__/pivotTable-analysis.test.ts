@@ -997,9 +997,9 @@ describe('pivotTable grouped grand total edge cases', () => {
   test('sorts non-leaf grouped totals by their own aggregated values', () => {
     const pivotTable = createPivotTable(
       [
+        { organization: '公司三', category: '贷款', type: '信用贷', balance: 500 },
         { organization: '公司一', category: '票据', type: '银票', balance: 100 },
-        { organization: '公司二', category: '票据', type: '商票', balance: 600 },
-        { organization: '公司三', category: '贷款', type: '信用贷', balance: 500 }
+        { organization: '公司二', category: '票据', type: '商票', balance: 600 }
       ],
       {
         rows: ['organization', 'category', 'type'],
