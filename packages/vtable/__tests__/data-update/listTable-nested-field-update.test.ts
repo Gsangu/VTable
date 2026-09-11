@@ -77,4 +77,48 @@ describe('ListTable nested field updates', () => {
     });
     table.release();
   });
+
+  test('matches copied array fields when resolving a custom sort function', () => {
+    const field = ['facts', 'qty'];
+    const orderFn = jest.fn();
+    const table = new ListTable({
+      container: createDiv(),
+      columns: [{ field, title: 'Quantity', sort: orderFn }],
+      records: [{ facts: { qty: 10 } }]
+    });
+
+    expect(table._getSortFuncFromHeaderOption(undefined, [...field])).toBe(orderFn);
+    table.release();
+  });
+
+  test('reports stored values when updates create records', () => {
+    const field = ['facts', 'qty'];
+    const records: any[] = [];
+    const table = new ListTable({
+      container: createDiv(),
+      columns: [{ field, title: 'Quantity' }],
+      records
+    });
+    const cellEvents: any[] = [];
+    const batchEvents: any[] = [];
+    table.on('change_cell_value', event => cellEvents.push(event));
+    table.on('change_cell_values', event => batchEvents.push(event));
+    table.dataSource.beforeChangedRecordsMap.set('0', { facts: { qty: 0 } });
+
+    table.changeCellValueByRecord(0, [...field], '12', {
+      autoRefresh: false,
+      noTriggerChangeCellValuesEvent: true
+    });
+
+    expect(records[0].facts.qty).toBe(12);
+    expect(cellEvents[0].changedValue).toBe(12);
+
+    table.dataSource.beforeChangedRecordsMap.set('1', { facts: { qty: 0 } });
+    table.changeCellValuesByRecords([{ recordIndex: 1, field: [...field], value: '14' }], { autoRefresh: false });
+
+    expect(records[1].facts.qty).toBe(14);
+    expect(cellEvents[1].changedValue).toBe(14);
+    expect(batchEvents[0].values).toEqual([cellEvents[1]]);
+    table.release();
+  });
 });

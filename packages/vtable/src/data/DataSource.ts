@@ -178,7 +178,7 @@ export function getRecordFieldValue(record: any, field: FieldDef | number): any 
 }
 
 function setRecordProperty(record: any, key: string, value: any): void {
-  if (key === '__proto__') {
+  if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
     Object.defineProperty(record, key, {
       configurable: true,
       enumerable: true,
@@ -196,7 +196,7 @@ export function setRecordFieldValue(record: any, field: FieldDef | number, value
   }
   const path = getRecordFieldPath(field);
   if (!path || (!Array.isArray(field) && isRecordContainer(record) && (field as any) in record)) {
-    record[field as any] = value;
+    setRecordProperty(record, field as any, value);
     return;
   }
 

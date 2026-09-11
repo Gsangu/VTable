@@ -1415,7 +1415,7 @@ export class ListTable extends BaseTable implements ListTableAPI {
       for (let i = 0; i < columns.length; i++) {
         const header = columns[i];
         if (
-          ((fieldKey && fieldKey === header.fieldKey) || (!fieldKey && header.field === field)) &&
+          ((fieldKey && fieldKey === header.fieldKey) || (!fieldKey && isSameField(header.field, field))) &&
           header.sort &&
           typeof header.sort === 'function'
         ) {
@@ -1451,7 +1451,9 @@ export class ListTable extends BaseTable implements ListTableAPI {
           this.dataSource.sort(
             normalizedSortState.map((item: any) => {
               const sortFunc = this._getSortFuncFromHeaderOption(this.internalProps.columns, item.field);
-              const hd = this.internalProps.layoutMap.headerObjects.find((col: any) => col && col.field === item.field);
+              const hd = this.internalProps.layoutMap.headerObjects.find(
+                (col: any) => col && isSameField(col.field, item.field)
+              );
               return {
                 field: item.field,
                 order: item.order,
@@ -1656,7 +1658,7 @@ export class ListTable extends BaseTable implements ListTableAPI {
                 const sortFunc = this._getSortFuncFromHeaderOption(undefined, item.field);
                 // 如果sort传入的信息不能生成正确的sortFunc，直接更新表格，避免首次加载无法正常显示内容
                 const hd = this.internalProps.layoutMap.headerObjectsIncludeHided.find(
-                  (col: any) => col && col.field === item.field
+                  (col: any) => col && isSameField(col.field, item.field)
                 );
                 return {
                   field: item.field,
@@ -1948,6 +1950,9 @@ export class ListTable extends BaseTable implements ListTableAPI {
     }
 
     this.dataSource.changeFieldValueByRecordIndex(value, recordIndex, field, this);
+    if (Array.isArray(records)) {
+      record = Array.isArray(recordIndex) ? getValueFromDeepArray(records, recordIndex) : records[recordIndex];
+    }
 
     if (!triggerEvent) {
       return;
@@ -2040,6 +2045,9 @@ export class ListTable extends BaseTable implements ListTableAPI {
       }
 
       this.dataSource.changeFieldValueByRecordIndex(value, recordIndex, field, this);
+      if (Array.isArray(records)) {
+        record = Array.isArray(recordIndex) ? getValueFromDeepArray(records, recordIndex) : records[recordIndex];
+      }
 
       if (triggerEvent) {
         const changedValue =

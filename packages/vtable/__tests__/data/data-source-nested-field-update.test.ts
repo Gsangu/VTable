@@ -130,4 +130,35 @@ describe('DataSource nested field updates', () => {
       expect(getField(record, field, 0, 0, table, () => undefined)).toBeUndefined();
     }
   });
+
+  test('writes a literal __proto__ field without changing the record prototype', () => {
+    const record = {};
+    const dataSource = new DataSource({ records: [record] });
+
+    dataSource.changeFieldValueByRecordIndex('safe', 0, '__proto__');
+
+    expect(Object.getPrototypeOf(record)).toBe(Object.prototype);
+    expect(Object.prototype.hasOwnProperty.call(record, '__proto__')).toBe(true);
+    expect(Object.getOwnPropertyDescriptor(record, '__proto__')?.value).toBe('safe');
+    dataSource.release();
+  });
+
+  test('creates sensitive nested path keys without polluting Object.prototype', () => {
+    const record = {};
+    const dataSource = new DataSource({ records: [record] });
+
+    dataSource.changeFieldValueByRecordIndex('safe', 0, 'constructor.prototype.polluted');
+
+    expect(Object.prototype.hasOwnProperty.call(record, 'constructor')).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(record.constructor, 'prototype')).toBe(true);
+    expect(record.constructor.prototype.polluted).toBe('safe');
+    expect(Object.prototype.polluted).toBeUndefined();
+
+    dataSource.changeFieldValueByRecordIndex('nested-safe', 0, ['__proto__', 'polluted']);
+
+    expect(Object.getPrototypeOf(record)).toBe(Object.prototype);
+    expect(Object.getOwnPropertyDescriptor(record, '__proto__')?.value.polluted).toBe('nested-safe');
+    expect(Object.prototype.polluted).toBeUndefined();
+    dataSource.release();
+  });
 });
