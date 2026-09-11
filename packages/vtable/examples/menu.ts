@@ -76,6 +76,10 @@ export const menus = [
       },
       {
         path: 'debug',
+        name: 'issue-4186-nested-field-edit'
+      },
+      {
+        path: 'debug',
         name: 'issue-4761-update-records-edit-render'
       },
       {
