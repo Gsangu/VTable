@@ -12,6 +12,7 @@
 - **@visactor/vtable**: update nested fields by path
 - **@visactor/vtable**: prefer event clipboard data for copy and cut, fall back to it for paste when the async Clipboard API is unavailable, preserve cut source cells until paste succeeds, and normalize pasted HTML cell content (GitHub #5274)
 - **@visactor/vtable**: preserve pivot table column widths after updateOption (#5298)
+- **@visactor/vtable-sheet**: keep test-only plugin sources out of the package compile
 
 **Full Changelog**: https://github.com/VisActor/VTable/compare/v1.26.7...v1.26.8
 
