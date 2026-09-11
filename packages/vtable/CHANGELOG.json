@@ -2,6 +2,32 @@
   "name": "@visactor/vtable",
   "entries": [
     {
+      "version": "1.26.8",
+      "tag": "@visactor/vtable_v1.26.8",
+      "date": "Fri, 11 Sep 2026 09:49:37 GMT",
+      "comments": {
+        "none": [
+          {
+            "comment": "feat: add themes.setDefaultTheme for application-wide default styling"
+          }
+        ],
+        "patch": [
+          {
+            "comment": "fix: prevent empty image, audio, and video cells from opening media previews (GitHub #5290)"
+          },
+          {
+            "comment": "fix: update nested fields by path"
+          },
+          {
+            "comment": "fix: prefer event clipboard data for copy and cut, fall back to it for paste when the async Clipboard API is unavailable, preserve cut source cells until paste succeeds, and normalize pasted HTML cell content (GitHub #5274)"
+          },
+          {
+            "comment": "fix: preserve pivot table column widths after updateOption (#5298)"
+          }
+        ]
+      }
+    },
+    {
       "version": "1.26.7",
       "tag": "@visactor/vtable_v1.26.7",
       "date": "Thu, 20 Aug 2026 08:02:48 GMT",

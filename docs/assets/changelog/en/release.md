@@ -1,3 +1,22 @@
+# v1.26.8
+
+2026-09-11
+
+**🆕 New Features**
+
+- **@visactor/vtable**: add themes.setDefaultTheme for application-wide default styling
+
+**🐛 Bug Fixes**
+
+- **@visactor/vtable**: prevent empty image, audio, and video cells from opening media previews (GitHub #5290)
+- **@visactor/vtable**: update nested fields by path
+- **@visactor/vtable**: prefer event clipboard data for copy and cut, fall back to it for paste when the async Clipboard API is unavailable, preserve cut source cells until paste succeeds, and normalize pasted HTML cell content (GitHub #5274)
+- **@visactor/vtable**: preserve pivot table column widths after updateOption (#5298)
+
+**Full Changelog**: https://github.com/VisActor/VTable/compare/v1.26.7...v1.26.8
+
+[more detail about v1.26.8](https://github.com/VisActor/VTable/releases/tag/v1.26.8)
+
 # v1.26.7
 
 2026-08-20

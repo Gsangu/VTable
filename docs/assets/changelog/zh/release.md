@@ -1,3 +1,22 @@
+# v1.26.8
+
+2026-09-11
+
+**🆕 新增功能**
+
+- **@visactor/vtable**: 新增 themes.setDefaultTheme for application-wide default styling
+
+**🐛 问题修复**
+
+- **@visactor/vtable**: prevent empty image, audio, and video cells from opening media previews (GitHub #5290)
+- **@visactor/vtable**: 更新 nested fields by path
+- **@visactor/vtable**: prefer event clipboard data for copy and cut, fall back it for paste when the async Clipboard API is unavailable, preserve cut source cells until paste succeeds, and normalize pasted HTML cell content (GitHub #5274)
+- **@visactor/vtable**: preserve pivot table column widths after updateOption (#5298)
+
+**Full Changelog**: https://github.com/VisActor/VTable/compare/v1.26.7...v1.26.8
+
+[更多详情请查看 v1.26.8](https://github.com/VisActor/VTable/releases/tag/v1.26.8)
+
 # v1.26.7
 
 2026-08-20
