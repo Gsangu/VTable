@@ -103,4 +103,31 @@ describe('DataSource nested field updates', () => {
     expect(dataSource.hasField(0, 'facts.2025-02.qty')).toBe(true);
     dataSource.release();
   });
+
+  test('recognizes numeric fields in array records', () => {
+    const records = [[10, 20]];
+    const dataSource = new DataSource({ records });
+
+    expect(dataSource.hasField(0, 0)).toBe(true);
+    expect(dataSource.hasField(0, 1)).toBe(true);
+    expect(dataSource.hasField(0, 2)).toBe(false);
+    dataSource.release();
+  });
+
+  test('keeps array-path reads aligned when an intermediate value is falsy', () => {
+    const table = { leftRowSeriesNumberCount: 0 } as any;
+    const record = {
+      nested: {
+        zero: 0,
+        disabled: false,
+        empty: ''
+      }
+    };
+
+    for (const key of ['zero', 'disabled', 'empty']) {
+      const field = ['nested', key, 'missing'];
+      expect(getRecordFieldValue(record, field)).toBeUndefined();
+      expect(getField(record, field, 0, 0, table, () => undefined)).toBeUndefined();
+    }
+  });
 });

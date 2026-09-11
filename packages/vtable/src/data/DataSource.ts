@@ -17,9 +17,9 @@ import type {
 import { AggregationType, HierarchyState } from '../ts-types';
 import { applyChainSafe, getOrApply, obj, isPromise, emptyFn } from '../tools/helper';
 import { EventTarget } from '../event/EventTarget';
-import { computeChildrenNodeLength, getValueByPath, isAllDigits } from '../tools/util';
+import { computeChildrenNodeLength, isAllDigits } from '../tools/util';
 import { calculateArrayDiff } from '../tools/diff-cell';
-import { arrayEqual, cloneDeep, isArray, isNumber, isObject, isValid } from '@visactor/vutils';
+import { arrayEqual, cloneDeep, isArray, isNumber, isValid } from '@visactor/vutils';
 import type { BaseTableAPI } from '../ts-types/base-table';
 import {
   RecordAggregator,
@@ -101,11 +101,11 @@ export function getField(
     return record[colIndex];
   }
   if (Array.isArray(fieldGet)) {
-    const fieldResult = getValueByPath(record, [...fieldGet]);
+    const fieldResult = getRecordFieldValue(record, fieldGet);
     return getValue(fieldResult, promiseCallBack);
   }
-  if (isObject(record) && fieldGet in (record as any)) {
-    const fieldResult = (record as any)[fieldGet];
+  if (isRecordContainer(record) && fieldGet in record) {
+    const fieldResult = record[fieldGet];
 
     return getValue(fieldResult, promiseCallBack);
   }
@@ -115,7 +115,7 @@ export function getField(
   }
   const fieldArray = `${fieldGet}`.split('.');
   if (fieldArray.length <= 1) {
-    const fieldResult = (record as any)[fieldGet];
+    const fieldResult = record[fieldGet];
     return getValue(fieldResult, promiseCallBack);
   }
   const fieldResult = applyChainSafe(
@@ -124,6 +124,10 @@ export function getField(
     ...fieldArray
   );
   return getValue(fieldResult, promiseCallBack);
+}
+
+function isRecordContainer(value: any): boolean {
+  return value !== null && typeof value === 'object';
 }
 
 function getRecordFieldPath(field: FieldDef | number): string[] | undefined {
@@ -137,7 +141,7 @@ function getRecordFieldPath(field: FieldDef | number): string[] | undefined {
 }
 
 function hasRecordField(record: any, field: FieldDef | number): boolean {
-  if (!isObject(record)) {
+  if (!isRecordContainer(record)) {
     return false;
   }
   const path = getRecordFieldPath(field);
@@ -149,7 +153,7 @@ function hasRecordField(record: any, field: FieldDef | number): boolean {
   }
   let target = record;
   for (const key of path) {
-    if (!isObject(target) || !(key in target)) {
+    if (!isRecordContainer(target) || !(key in target)) {
       return false;
     }
     target = target[key];
@@ -162,7 +166,7 @@ export function getRecordFieldValue(record: any, field: FieldDef | number): any 
     return undefined;
   }
   const path = getRecordFieldPath(field);
-  if (!Array.isArray(field) && isObject(record) && (field as any) in record) {
+  if (!Array.isArray(field) && isRecordContainer(record) && (field as any) in record) {
     return record[field as any];
   }
   if (!path) {
@@ -191,7 +195,7 @@ export function setRecordFieldValue(record: any, field: FieldDef | number, value
     return;
   }
   const path = getRecordFieldPath(field);
-  if (!path || (!Array.isArray(field) && isObject(record) && (field as any) in record)) {
+  if (!path || (!Array.isArray(field) && isRecordContainer(record) && (field as any) in record)) {
     record[field as any] = value;
     return;
   }

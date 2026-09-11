@@ -30,8 +30,10 @@ const updateResult = (status: HTMLElement, source: HTMLElement) => {
 };
 
 const createControls = () => {
+  document.getElementById('issue4186Controls')?.remove();
   const container = document.getElementById(CONTAINER_ID)!;
   const controls = document.createElement('div');
+  controls.id = 'issue4186Controls';
   controls.style.cssText = 'margin-bottom: 12px; font: 13px/1.5 sans-serif;';
 
   const runButton = document.createElement('button');
