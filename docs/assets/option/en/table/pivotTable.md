@@ -225,10 +225,14 @@ export interface Total {
   showSubTotals: boolean;
   // Subtotal summary dimension definition
   subTotalsDimensions?: string[];
+  // Lower-level dimensions retained in the grand total area for grouped totals. Only dimensions after the first dimension on the current axis are supported.
+  grandTotalDimensions?: string[];
   //Default 'total'
   grandTotalLabel?: string;
   //Default 'Subtotal'
   subTotalLabel?: string;
+  // When subtotals are disabled in pivot tables, this option allows aggregated values to be displayed on collapsed tree nodes. Default value is false.
+  showSubTotalsOnTreeNode?: boolean;
 }
 ```
 
@@ -268,6 +272,7 @@ export interface CalculatedFieldRule {
   calculateFun?: (dependFieldsValue: any) => any;
 }
 ```
+
 ### updateAggregationOnEditCell (boolean)
 
 Whether to update total and subtotal after editing cell value. Default value is false.
@@ -460,4 +465,5 @@ columnWidthConfigForRowHeader": [
     }
   ]
 ```
+
 Matching key is the key of the row dimension: dimensionKey。

@@ -1,5 +1,5 @@
 import { vglobal } from '@visactor/vtable/es/vrender';
-import type { FederatedPointerEvent, FederatedWheelEvent } from '@visactor/vtable/es/vrender';
+import type { FederatedPointerEvent, FederatedWheelEvent, Group } from '@visactor/vtable/es/vrender';
 import type { Gantt } from '../Gantt';
 import { EventHandler } from '../event/EventHandler';
 import { handleWhell } from '../event/scroll';
@@ -114,12 +114,8 @@ function bindTableGroupListener(event: EventManager) {
       return false;
     });
     if (downBarNode) {
-      // 获取任务记录
-      // const { taskRecord } = scene._gantt.getTaskInfoByTaskListIndex(
-      //   downBarNode.task_index,
-      //   downBarNode.sub_task_index
-      // );
-      const taskRecord = downBarNode.record;
+      const taskRecord = scene._gantt.getRecordByIndex(downBarNode.task_index, downBarNode.sub_task_index);
+      downBarNode.record = taskRecord;
       // 检查是否是project类型
       const isProjectTask = taskRecord?.type === TaskType.PROJECT;
       if (!isProjectTask) {
@@ -220,6 +216,19 @@ function bindTableGroupListener(event: EventManager) {
       event.touchSetTimeout = undefined;
     }
     if (stateManager.interactionState === InteractionState.default) {
+      let locateIconTarget: Group | null = null;
+      if (gantt.parsedOptions.taskBarLocateIcon) {
+        // 优先处理定位图标 hover：避免与任务条 hover 互相抢占状态
+        locateIconTarget = e.detailPath.find((pathNode: any) => {
+          return pathNode.name === 'task-bar-locate-icon-left' || pathNode.name === 'task-bar-locate-icon-right';
+        }) as any as Group;
+        if (locateIconTarget) {
+          scene._gantt.scenegraph.taskBar.setLocateIconHover(locateIconTarget);
+        } else if (scene._gantt.scenegraph.taskBar.currentHoverLocateIcon) {
+          scene._gantt.scenegraph.taskBar.setLocateIconHover(null);
+        }
+      }
+
       const taskBarTarget = e.detailPath.find((pathNode: any) => {
         return pathNode.name === 'task-bar'; // || pathNode.name === 'task-bar-hover-shadow';
       });
@@ -232,7 +241,7 @@ function bindTableGroupListener(event: EventManager) {
       if (gantt.parsedOptions.markLineCreateOptions?.markLineCreatable) {
         if (
           marklineCreateGroupTarget &&
-          !judgeIfHasMarkLine(marklineCreateGroupTarget.data, gantt.parsedOptions.markLine)
+          !judgeIfHasMarkLine((marklineCreateGroupTarget as any).data, gantt.parsedOptions.markLine)
         ) {
           if (scene._gantt.stateManager.marklineIcon.target !== marklineCreateGroupTarget) {
             scene._gantt.stateManager.marklineIcon.target = marklineCreateGroupTarget;
@@ -246,11 +255,12 @@ function bindTableGroupListener(event: EventManager) {
       }
 
       if (taskBarTarget) {
-        if (scene._gantt.stateManager.hoverTaskBar.target !== (taskBarTarget as any as GanttTaskBarNode)) {
-          scene._gantt.stateManager.hoverTaskBar.target = taskBarTarget as any as GanttTaskBarNode;
-          const taskIndex = taskBarTarget.task_index;
-          const sub_task_index = taskBarTarget.sub_task_index;
-          const record = taskBarTarget.record;
+        const taskBarNode = taskBarTarget as any as GanttTaskBarNode;
+        if (scene._gantt.stateManager.hoverTaskBar.target !== taskBarNode) {
+          scene._gantt.stateManager.hoverTaskBar.target = taskBarNode;
+          const taskIndex = taskBarNode.task_index;
+          const sub_task_index = taskBarNode.sub_task_index;
+          const record = taskBarNode.record;
           // const record = scene._gantt.getRecordByIndex(taskIndex, sub_task_index);
           if (record.type !== TaskType.PROJECT) {
             stateManager.showTaskBarHover();
@@ -266,7 +276,7 @@ function bindTableGroupListener(event: EventManager) {
             });
           }
         }
-      } else {
+      } else if (!locateIconTarget) {
         if (scene._gantt.stateManager.hoverTaskBar.target) {
           if (scene._gantt.hasListeners(GANTT_EVENT_TYPE.MOUSELEAVE_TASK_BAR)) {
             // const taskIndex = getTaskIndexByY(e.offset.y, scene._gantt);
@@ -374,10 +384,13 @@ function bindTableGroupListener(event: EventManager) {
         }
         return false;
       });
-      downBarNode =
-        downBarNode ??
-        downLeftLinkPointNode?.parent?.attribute.attachedToTaskBarNode ??
-        downRightLinkPointNode?.parent?.attribute.attachedToTaskBarNode;
+      if (downLeftLinkPointNode && (downLeftLinkPointNode as any).parent) {
+        downBarNode = downBarNode ?? ((downLeftLinkPointNode as any).parent.attribute as any)?.attachedToTaskBarNode;
+      }
+      if (downRightLinkPointNode && (downRightLinkPointNode as any).parent) {
+        downBarNode = downBarNode ?? ((downRightLinkPointNode as any).parent.attribute as any)?.attachedToTaskBarNode;
+      }
+      // TypeScript: downLeftLinkPointNode and downRightLinkPointNode may be undefined, but we've handled it with optional chaining
       if (scene._gantt.stateManager.isCreatingDependencyLine() && !downBarNode) {
         //如果正在创建依赖链，但是鼠标没有一定到目标taskBar上
         stateManager.hideSecondTaskBarSelectedBorder();
@@ -441,8 +454,10 @@ function bindTableGroupListener(event: EventManager) {
       let depedencyLink;
       let isClickMarklineIcon = false;
       let isClickMarklineContent = false;
+      let isClickLocateIcon = false;
       let markLineContentTarget: any;
       let markLineIconTarget: any;
+      let locateIconTarget: any;
 
       const taskBarTarget = e.detailPath.find((pathNode: any) => {
         if (pathNode.name === 'task-bar') {
@@ -472,17 +487,37 @@ function bindTableGroupListener(event: EventManager) {
           isClickMarklineContent = true;
           markLineContentTarget = pathNode;
           return false;
+        } else if (
+          gantt.parsedOptions.taskBarLocateIcon &&
+          (pathNode.name === 'task-bar-locate-icon-left' || pathNode.name === 'task-bar-locate-icon-right')
+        ) {
+          isClickLocateIcon = true;
+          locateIconTarget = pathNode;
+          return false;
         }
         return false;
       });
 
-      if (isClickBar && scene._gantt.parsedOptions.taskBarSelectable && event.poniterState === 'down') {
+      if (isClickLocateIcon && event.poniterState === 'down') {
+        // 点击定位图标：将任务条滚动到可视区（左右边缘附近），便于快速定位长时间轴任务
+        const barNode = locateIconTarget?.attachedToTaskBarNode as GanttTaskBarNode;
+        const side = locateIconTarget?.side as 'left' | 'right';
+        if (barNode) {
+          const barLeft = barNode.attribute.x;
+          const barRight = barLeft + barNode.attribute.width;
+          const viewWidth = gantt.tableNoFrameWidth;
+          const padding = 12;
+          const targetLeft = side === 'left' ? barLeft - padding : barRight - viewWidth + padding;
+          gantt.stateManager.setScrollLeft(targetLeft);
+        }
+      } else if (isClickBar && scene._gantt.parsedOptions.taskBarSelectable && event.poniterState === 'down') {
         stateManager.hideDependencyLinkSelectedLine();
-        stateManager.showTaskBarSelectedBorder(taskBarTarget);
+        const taskBarNode = taskBarTarget as any as GanttTaskBarNode;
+        stateManager.showTaskBarSelectedBorder(taskBarNode);
         if (gantt.hasListeners(GANTT_EVENT_TYPE.CLICK_TASK_BAR)) {
           // const taskIndex = getTaskIndexByY(e.offset.y, gantt);
-          const taskIndex = taskBarTarget.task_index;
-          const sub_task_index = taskBarTarget.sub_task_index;
+          const taskIndex = taskBarNode.task_index;
+          const sub_task_index = taskBarNode.sub_task_index;
           const record = gantt.getRecordByIndex(taskIndex, sub_task_index);
           gantt.fireListeners(GANTT_EVENT_TYPE.CLICK_TASK_BAR, {
             federatedEvent: e,
@@ -633,8 +668,9 @@ function bindTableGroupListener(event: EventManager) {
     if (isClickBar) {
       if (gantt.hasListeners(GANTT_EVENT_TYPE.CONTEXTMENU_TASK_BAR)) {
         // const taskIndex = getTaskIndexByY(e.offset.y, gantt);
-        const taskIndex = taskBarTarget.task_index;
-        const sub_task_index = taskBarTarget.sub_task_index;
+        const taskBarNode = taskBarTarget as any as GanttTaskBarNode;
+        const taskIndex = taskBarNode.task_index;
+        const sub_task_index = taskBarNode.sub_task_index;
         const record = gantt.getRecordByIndex(taskIndex, sub_task_index);
         gantt.fireListeners(GANTT_EVENT_TYPE.CONTEXTMENU_TASK_BAR, {
           federatedEvent: e,
@@ -672,6 +708,9 @@ function bindTableGroupListener(event: EventManager) {
   });
 
   scene.ganttGroup.addEventListener('pointerleave', (e: FederatedPointerEvent) => {
+    if (scene._gantt.scenegraph.taskBar.currentHoverLocateIcon) {
+      scene._gantt.scenegraph.taskBar.setLocateIconHover(null);
+    }
     if (
       (gantt.parsedOptions.scrollStyle.horizontalVisible &&
         gantt.parsedOptions.scrollStyle.horizontalVisible === 'focus') ||

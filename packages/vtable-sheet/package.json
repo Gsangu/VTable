@@ -1,6 +1,6 @@
 {
   "name": "@visactor/vtable-sheet",
-  "version": "1.22.8",
+  "version": "1.26.8",
   "description": "Lightweight editable spreadsheet component based on VTable",
   "keywords": [
     "vtable-sheet",
@@ -50,9 +50,9 @@
     "build:es": "bundle --clean -f es --ignorePostTasks"
   },
   "dependencies": {
-    "@visactor/vtable": "workspace:*",
-    "@visactor/vtable-editors": "workspace:*",
-    "@visactor/vtable-plugins": "workspace:*",
+    "@visactor/vtable": "workspace:1.26.8",
+    "@visactor/vtable-editors": "workspace:1.26.8",
+    "@visactor/vtable-plugins": "workspace:1.26.8",
     "@visactor/vutils": "~1.0.17",
     "@visactor/vscale": "~1.0.17",
     "@visactor/vdataset": "~1.0.17",
@@ -64,10 +64,10 @@
     "@internal/eslint-config": "workspace:*",
     "@internal/ts-config": "workspace:*",
     "@rushstack/eslint-patch": "~1.1.4",
-    "react": "^18.0.0",
-    "react-dom": "^18.0.0",
-    "@types/react": "^18.0.0",
-    "@types/react-dom": "^18.0.0",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "@types/react": "18.2.79",
+    "@types/react-dom": "18.2.25",
     "@vitejs/plugin-react": "3.1.0",
     "eslint": "~8.18.0",
     "vite": "3.2.6",
@@ -104,7 +104,8 @@
   },
   "unpkg": "latest",
   "unpkgFiles": [
-    "dist/vtable-sheet.js"
+    "dist/vtable-sheet.js",
+    "dist/vtable-sheet.min.js"
   ],
   "publishConfig": {
     "access": "public"
@@ -114,5 +115,6 @@
     "type": "git",
     "url": "https://github.com/VisActor/VTable.git",
     "directory": "packages/vtable-sheet"
-  }
+  },
+  "packageManager": "pnpm@10.7.0"
 }

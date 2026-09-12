@@ -76,6 +76,44 @@ tableInstance.updateColumns(newColumns, { clearColWidthCache: true })
 tableInstance.columns = newColumns;
 ```
 
+## changeHeaderPosition(Function)
+
+以编程方式移动表头位置（等价于拖拽表头移动），返回是否移动成功。
+
+```ts
+  changeHeaderPosition: (args: {
+    source: CellAddress;
+    target: CellAddress;
+    movingColumnOrRow?: 'column' | 'row';
+  }) => boolean
+```
+
+使用示例：
+
+```ts
+tableInstance.changeHeaderPosition({
+  source: { col: 1, row: 0 },
+  target: { col: 3, row: 0 },
+  movingColumnOrRow: 'column'
+});
+```
+
+## mergeCells(Function)
+
+合并单元格（仅 ListTable）。调用后会刷新渲染，并触发 `merge_cells` 事件。
+
+```ts
+  mergeCells: (startCol: number, startRow: number, endCol: number, endRow: number) => void
+```
+
+## unmergeCells(Function)
+
+取消合并单元格（仅 ListTable）。调用后会刷新渲染，并触发 `unmerge_cells` 事件。
+
+```ts
+  unmergeCells: (startCol: number, startRow: number, endCol: number, endRow: number) => void
+```
+
 ## updatePagination(Function)
 
 更新页码配置信息 调用后会自动重绘。
@@ -1456,6 +1494,8 @@ export type TooltipOptions = {
     padding?: number[];
     arrowMark?: boolean;
   };
+  /** 设置tooltip的出现延迟时间 */
+  appearDelay?: number;
   /** 设置tooltip的消失时间 */
   disappearDelay?: number;
 };
@@ -1710,8 +1750,43 @@ const rowImage = tableInstance.exportCellRangeImg(rowRange);
    * @param value 更改后的值
    * @param workOnEditableCell 是否仅更改可编辑单元格
    * @param triggerEvent 是否在值发生改变的时候触发change_cell_value事件
+   * @param noTriggerChangeCellValuesEvent 是否不触发 change_cell_values 聚合事件
    */
-  changeCellValue: (col: number, row: number, value: string | number | null, workOnEditableCell = false, triggerEvent = true) => void;
+  changeCellValue: (
+    col: number,
+    row: number,
+    value: string | number | null,
+    workOnEditableCell = false,
+    triggerEvent = true,
+    noTriggerChangeCellValuesEvent?: boolean
+  ) => void;
+```
+
+## changeCellValuesByRanges(Function)
+
+批量更新多个离散选区内的单元格数据。
+
+当前仅支持将所有选区内的单元格统一修改为同一个 value。
+
+**ListTable 专有**
+
+```
+  /**
+   * 批量更新多个离散选区内的单元格数据。
+   * 当前仅支持将所有选区内的单元格统一修改为同一个 value。
+   * @param ranges 选区范围（支持多个）
+   * @param value 要设置的统一值
+   * @param workOnEditableCell 是否仅更改可编辑单元格
+   * @param triggerEvent 是否触发 change_cell_value/change_cell_values 事件
+   * @param noTriggerChangeCellValuesEvent 是否不触发 change_cell_values 聚合事件
+   */
+  changeCellValuesByRanges: (
+    ranges: CellRange[],
+    value: string | number | null,
+    workOnEditableCell?: boolean,
+    triggerEvent?: boolean,
+    noTriggerChangeCellValuesEvent?: boolean
+  ) => void;
 ```
 
 ## changeCellValues(Function)
@@ -1726,8 +1801,108 @@ const rowImage = tableInstance.exportCellRangeImg(rowRange);
    * @param values 多个单元格的数据数组
    * @param workOnEditableCell 是否仅更改可编辑单元格
    * @param triggerEvent 是否在值发生改变的时候触发change_cell_value事件
+   * @param noTriggerChangeCellValuesEvent 是否不触发 change_cell_values 聚合事件
    */
-  changeCellValues(startCol: number, startRow: number, values: string[][], workOnEditableCell = false, triggerEvent=true) => Promise<boolean[][]>;
+  changeCellValues: (
+    startCol: number,
+    startRow: number,
+    values: string[][],
+    workOnEditableCell?: boolean,
+    triggerEvent?: boolean,
+    noTriggerChangeCellValuesEvent?: boolean
+  ) => Promise<boolean[][]>;
+```
+
+## changeCellValueByRecord(Function)
+
+根据 recordIndex（源数据 records 的索引）+ field 修改值。
+
+**ListTable 专有**
+
+```
+  /**
+   * 根据 recordIndex（源数据 records 的索引）+ field 修改值。
+   * recordIndex 为源数据中的索引：普通表格为 number；树形表格为 number[]（children 路径）。
+   */
+  changeCellValueByRecord: (
+    recordIndex: number | number[],
+    field: FieldDef,
+    value: string | number | null,
+    options?: {
+      triggerEvent?: boolean;
+      noTriggerChangeCellValuesEvent?: boolean;
+      autoRefresh?: boolean;
+    }
+  ) => void;
+```
+
+## changeCellValuesByRecords(Function)
+
+根据 recordIndex（源数据 records 的索引）+ field 批量修改值。
+
+**ListTable 专有**
+
+```
+  changeCellValuesByRecords: (
+    changeValues: Array<{
+      recordIndex: number | number[];
+      field: FieldDef;
+      value: string | number | null;
+    }>,
+    options?: {
+      triggerEvent?: boolean;
+      noTriggerChangeCellValuesEvent?: boolean;
+      autoRefresh?: boolean;
+    }
+  ) => void;
+```
+
+## changeCellValueBySource(Function)
+
+changeCellValueByRecord 的别名形式（位置参数）。
+
+**ListTable 专有**
+
+```
+  changeCellValueBySource: (
+    recordIndex: number | number[],
+    field: FieldDef,
+    value: string | number | null,
+    triggerEvent?: boolean,
+    noTriggerChangeCellValuesEvent?: boolean
+  ) => void;
+```
+
+## changeCellValuesBySource(Function)
+
+changeCellValuesByRecords 的别名形式（位置参数）。
+
+**ListTable 专有**
+
+```
+  changeCellValuesBySource: (
+    changeValues: Array<{
+      recordIndex: number | number[];
+      field: FieldDef;
+      value: string | number | null;
+    }>,
+    triggerEvent?: boolean,
+    noTriggerChangeCellValuesEvent?: boolean
+  ) => void;
+```
+
+## refreshAfterSourceChange(Function)
+
+源数据修改后刷新表格（可控制是否重新应用筛选/排序）。
+
+**ListTable 专有**
+
+```
+  refreshAfterSourceChange: (options?: {
+    reapplyFilter?: boolean;
+    reapplySort?: boolean;
+    clearRowHeightCache?: boolean;
+  }) => void;
 ```
 
 ## getEditor(Function)
@@ -1759,6 +1934,15 @@ const rowImage = tableInstance.exportCellRangeImg(rowRange);
   completeEditCell: () => void;
 ```
 
+## cancelEditCell(Function)
+
+取消编辑，不保存任何更改
+
+```
+  /** 取消编辑 */
+  cancelEditCell: () => void;
+```
+
 ## records
 
 获取当前表格的全部数据
@@ -1784,6 +1968,10 @@ const rowImage = tableInstance.exportCellRangeImg(rowRange);
   addRecords(records: any[], recordIndex?: number|number[])
 ```
 
+**说明：**
+
+- 若开启 `syncRecordOperationsToSourceRecords`，则在筛选/排序状态下的新增操作也会同步修改到原始 `records`（源数据）。
+
 ## addRecord(Function)
 
 添加数据，单条数据
@@ -1800,6 +1988,10 @@ const rowImage = tableInstance.exportCellRangeImg(rowRange);
    */
   addRecord(record: any, recordIndex?: number|number[])
 ```
+
+**说明：**
+
+- 若开启 `syncRecordOperationsToSourceRecords`，则在筛选/排序状态下的新增操作也会同步修改到原始 `records`（源数据）。
 
 ## deleteRecords(Function)
 
@@ -1825,9 +2017,9 @@ const rowImage = tableInstance.exportCellRangeImg(rowRange);
   /**
    * 修改数据 支持多条数据
    * @param records 修改数据条目
-   * @param recordIndexs 对应修改数据的索引（显示在body中的索引，即要修改的是body部分的第几行数据）,在树形（分组）结构中，recordIndex可能是一个数组，代表改节点从根节点开始的每级索引位置。
+   * @param recordIndexs 对应修改数据的索引（显示在body中的索引，即要修改的是body部分的第几行数据）,在树形（分组）结构中，recordIndex可能是一个数组，代表改节点从根节点开始的每级索引位置。省略时会按 records 顺序更新对应索引。
    */
-  updateRecords(records: any[], recordIndexs: number[]|number[][])
+  updateRecords(records: any[], recordIndexs?: number[]|number[][])
 ```
 
 ## getBodyVisibleCellRange(Function)
@@ -1916,13 +2108,20 @@ arrangeCustomCellStyle: (cellPosition: { col?: number; row?: number; range?: Cel
 getCheckboxState(field?: string | number): Array
 ```
 
+- field: 可选，checkbox 所在字段；不传时返回所有字段的 checkbox 状态
+- 返回值: checkbox 状态数组，树形数据会按 children 路径组织状态
+
 ## getCellCheckboxState(Function)
 
 获取某个单元格 checkbox 的状态
 
 ```
-getCellCheckboxState(col: number, row: number): Array
+getCellCheckboxState(col: number, row: number): boolean | 'indeterminate' | undefined
 ```
+
+- col: 列号
+- row: 行号
+- 返回值: 当前单元格 checkbox 状态
 
 ## getRadioState(Function)
 
@@ -1951,6 +2150,38 @@ setCellCheckboxState(col: number, row: number, checked: boolean) => void
 - col: 列号
 - row: 行号
 - checked: 是否选中
+
+## setCellCheckboxStateByRecordIndex(Function)
+
+根据源数据 records 的 index 和 field 设置 checkbox 状态。树形表格可传入 children 路径，例如 `[0, 1]` 表示第 1 条根节点下第 2 条子节点；即使该节点当前处于折叠不可见状态，也会更新其 checkbox 状态。
+
+```
+setCellCheckboxStateByRecordIndex(recordIndex: number | number[], field: string | number, checked: boolean | 'indeterminate') => void
+```
+
+- recordIndex: 源数据索引；普通表格为 number，树形表格为 number[]
+- field: checkbox 所在字段
+- checked: 是否选中，支持半选状态 `'indeterminate'`
+
+## clearCheckboxState(Function)
+
+清除指定 field 下所有 checkbox 的选中状态。`clearAllCheckboxState(field)` 是该方法的别名。
+
+```
+clearCheckboxState(field: string | number) => void
+```
+
+- field: checkbox 所在字段
+
+## clearAllCheckboxState(Function)
+
+`clearCheckboxState(field)` 的别名，用于清除指定 field 下所有 checkbox 的选中状态。
+
+```
+clearAllCheckboxState(field: string | number) => void
+```
+
+- field: checkbox 所在字段
 
 ## setCellRadioState(Function)
 
@@ -2325,4 +2556,36 @@ tableInstance.expandAllForColumnTree();
 ```ts
 // 折叠列表头树的所有节点
 tableInstance.collapseAllForColumnTree();
+```
+## updateCellContent(Function)
+
+更新某个单元格内容. 这个接口仅是刷新场景树节点内容而非渲染。重新渲染接口render()不会主动更新场景树节点内容。
+
+```ts
+  /**
+   * 更新某个单元格内容
+   */
+  updateCellContent: (col: number, row: number) => void;
+```
+
+## updateCellContentRange(Function)
+
+更新某个区域单元格内容. 这个接口仅是刷新场景树节点内容而非渲染。重新渲染接口render()不会主动更新场景树节点内容。
+
+```ts
+  /**
+   * 更新某个区域单元格内容
+   */
+  updateCellContentRange: (startCol: number, startRow: number, endCol: number, endRow: number) => void;
+```
+
+## updateCellContentRanges(Function)
+
+更新某个区域单元格内容. 这个接口仅是刷新场景树节点内容而非渲染。重新渲染接口render()不会主动更新场景树节点内容。
+
+```ts
+  /**
+   * 更新某个区域单元格内容
+   */
+  updateCellContentRanges: (ranges: CellRange[]) => void;
 ```

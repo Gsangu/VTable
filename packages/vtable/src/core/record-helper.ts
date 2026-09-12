@@ -5,9 +5,78 @@ import { computeColWidth } from '../scenegraph/layout/compute-col-width';
 import { computeRowHeight } from '../scenegraph/layout/compute-row-height';
 import { isPromise } from '../tools/helper';
 import { defaultOrderFn } from '../tools/util';
-import type { ListTableProtected, SortState } from '../ts-types';
+import type { CellRange, ListTableProtected, SortState } from '../ts-types';
 import { TABLE_EVENT_TYPE } from './TABLE_EVENT_TYPE';
 import { isNumber } from '@visactor/vutils';
+import { getCustomMergeCellFunc } from './utils/get-custom-merge-cell-func';
+
+function refreshCustomMergeCellGroups(table: ListTable) {
+  // 背景：删除行后 customMergeCell 已更新，但场景树 cellGroup 可能仍保留旧 mergeStart/End。
+  // 逻辑：重建内部 merge 查询函数，并对合并范围内所有 cell 逐格触发更新。
+  if (!Array.isArray(table.options.customMergeCell)) {
+    return;
+  }
+  table.internalProps.customMergeCell = getCustomMergeCellFunc(table.options.customMergeCell);
+  const merges = table.options.customMergeCell as any[];
+  for (let i = 0; i < merges.length; i++) {
+    const r = merges[i]?.range;
+    if (!r?.start) {
+      continue;
+    }
+    for (let col = r.start.col; col <= r.end.col; col++) {
+      for (let row = r.start.row; row <= r.end.row; row++) {
+        table.scenegraph.updateCellContent(col, row);
+      }
+    }
+  }
+}
+
+type ChangeCellTargetSnapshot = {
+  col: number;
+  row: number;
+  isHeader: boolean;
+  recordIndex?: number | number[];
+  field?: any;
+};
+
+function isSameRecordIndex(
+  sourceRecordIndex: number | number[] | undefined,
+  currentRecordIndex: number | number[] | undefined
+): boolean {
+  if (Array.isArray(sourceRecordIndex) || Array.isArray(currentRecordIndex)) {
+    return (
+      Array.isArray(sourceRecordIndex) &&
+      Array.isArray(currentRecordIndex) &&
+      sourceRecordIndex.length === currentRecordIndex.length &&
+      sourceRecordIndex.every((value, index) => value === currentRecordIndex[index])
+    );
+  }
+  return sourceRecordIndex === currentRecordIndex;
+}
+
+function isTargetCellSnapshotCurrent(table: ListTable, snapshot: ChangeCellTargetSnapshot): boolean {
+  if (table.isHeader(snapshot.col, snapshot.row) !== snapshot.isHeader) {
+    return false;
+  }
+  if (snapshot.isHeader) {
+    return true;
+  }
+  const recordShowIndex = table.getRecordShowIndexByCell(snapshot.col, snapshot.row);
+  const recordIndex = recordShowIndex >= 0 ? table.dataSource.getIndexKey(recordShowIndex) : undefined;
+  const { field } = table.internalProps.layoutMap.getBody(snapshot.col, snapshot.row);
+  return isSameRecordIndex(snapshot.recordIndex, recordIndex) && snapshot.field === field;
+}
+
+function areTargetCellSnapshotsCurrent(table: ListTable, snapshots: ChangeCellTargetSnapshot[][]): boolean {
+  for (let i = 0; i < snapshots.length; i++) {
+    for (let j = 0; j < snapshots[i].length; j++) {
+      if (!isTargetCellSnapshotCurrent(table, snapshots[i][j])) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
 
 /**
  * 更改单元格数据 会触发change_cell_value事件
@@ -23,19 +92,34 @@ export function listTableChangeCellValue(
   value: string | number | null,
   workOnEditableCell: boolean,
   triggerEvent: boolean,
-  table: ListTable
+  table: ListTable,
+  noTriggerChangeCellValuesEvent?: boolean
 ) {
   if ((workOnEditableCell && table.isHasEditorDefine(col, row)) || workOnEditableCell === false) {
-    const recordIndex = table.getRecordShowIndexByCell(col, row);
+    const recordShowIndex = table.getRecordShowIndexByCell(col, row);
+    const recordIndex = recordShowIndex >= 0 ? table.dataSource.getIndexKey(recordShowIndex) : undefined;
     const { field } = table.internalProps.layoutMap.getBody(col, row);
     const beforeChangeValue = table.getCellRawValue(col, row);
     const oldValue = table.getCellOriginValue(col, row);
     if (table.isHeader(col, row)) {
       table.internalProps.layoutMap.updateColumnTitle(col, row, value as string);
     } else {
-      table.dataSource.changeFieldValue(value, recordIndex, field, col, row, table);
+      table.dataSource.changeFieldValue(value, recordShowIndex, field, col, row, table);
     }
     const range = table.getCellRange(col, row);
+    if (
+      range.isCustom &&
+      range.start.col === col &&
+      range.start.row === row &&
+      Array.isArray(table.options.customMergeCell) &&
+      typeof table.getCellValue === 'function'
+    ) {
+      // 自定义合并单元格展示值由 customMergeCell.text 决定；当编辑落在合并范围左上角时，同步更新 text，保证显示与数据一致，且便于 undo/redo 回放。
+      const customMerge = (table as any).internalProps?.customMergeCell?.(col, row, table) as any;
+      if (customMerge) {
+        customMerge.text = value as any;
+      }
+    }
     //改变单元格的值后 聚合值做重新计算
     const aggregators = table.internalProps.layoutMap.getAggregatorsByCell(col, row);
     if (aggregators) {
@@ -95,13 +179,19 @@ export function listTableChangeCellValue(
     }
     const changedValue = table.getCellOriginValue(col, row);
     if (oldValue !== changedValue && triggerEvent) {
-      table.fireListeners(TABLE_EVENT_TYPE.CHANGE_CELL_VALUE, {
+      const changeValue = {
         col,
         row,
+        recordIndex,
+        field,
         rawValue: beforeChangeValue,
         currentValue: oldValue,
         changedValue
-      });
+      };
+      table.fireListeners(TABLE_EVENT_TYPE.CHANGE_CELL_VALUE, changeValue);
+      if (!noTriggerChangeCellValuesEvent) {
+        table.fireListeners(TABLE_EVENT_TYPE.CHANGE_CELL_VALUES, { values: [changeValue] });
+      }
     }
     table.scenegraph.updateNextFrame();
   }
@@ -120,7 +210,9 @@ export async function listTableChangeCellValues(
   values: (string | number)[][],
   workOnEditableCell: boolean,
   triggerEvent: boolean,
-  table: ListTable
+  table: ListTable,
+  noTriggerChangeCellValuesEvent?: boolean,
+  shouldCancel?: () => boolean
 ): Promise<boolean[][]> {
   const changedCellResults: boolean[][] = [];
   let pasteColEnd = startCol;
@@ -129,6 +221,7 @@ export async function listTableChangeCellValues(
   //#region 提前组织好未更改前的数据
   const beforeChangeValues: (string | number)[][] = [];
   const oldValues: (string | number)[][] = [];
+  const targetSnapshots: ChangeCellTargetSnapshot[][] = [];
   let cellUpdateType: 'normal' | 'sort' | 'group';
 
   for (let i = 0; i < values.length; i++) {
@@ -138,19 +231,76 @@ export async function listTableChangeCellValues(
     const rowValues = values[i];
     const rawRowValues: (string | number)[] = [];
     const oldRowValues: (string | number)[] = [];
+    const rowTargetSnapshots: ChangeCellTargetSnapshot[] = [];
     beforeChangeValues.push(rawRowValues);
     oldValues.push(oldRowValues);
+    targetSnapshots.push(rowTargetSnapshots);
     for (let j = 0; j < rowValues.length; j++) {
       if (startCol + j > table.colCount - 1) {
         break;
       }
+      const col = startCol + j;
+      const row = startRow + i;
       cellUpdateType = getCellUpdateType(startCol + j, startRow + i, table, cellUpdateType);
-      const beforeChangeValue = table.getCellRawValue(startCol + j, startRow + i);
+      const beforeChangeValue = table.getCellRawValue(col, row);
       rawRowValues.push(beforeChangeValue);
-      const oldValue = table.getCellOriginValue(startCol + j, startRow + i);
+      const oldValue = table.getCellOriginValue(col, row);
       oldRowValues.push(oldValue);
+      const isHeader = table.isHeader(col, row);
+      const recordShowIndex = table.getRecordShowIndexByCell(col, row);
+      const recordIndex = recordShowIndex >= 0 ? table.dataSource.getIndexKey(recordShowIndex) : undefined;
+      const { field } = table.internalProps.layoutMap.getBody(col, row);
+      rowTargetSnapshots.push({ col, row, isHeader, recordIndex, field });
     }
   }
+
+  const resultChangeValues: {
+    col: number;
+    row: number;
+    recordIndex?: number | number[];
+    field?: any;
+    rawValue: string | number;
+    currentValue: string | number;
+    changedValue: string | number;
+  }[] = [];
+
+  const preValidatedCellResults: boolean[][] | null = shouldCancel && workOnEditableCell ? [] : null;
+  if (preValidatedCellResults) {
+    for (let i = 0; i < values.length; i++) {
+      if (shouldCancel?.()) {
+        return changedCellResults;
+      }
+      if (startRow + i > table.rowCount - 1) {
+        break;
+      }
+      preValidatedCellResults[i] = [];
+      const rowValues = values[i];
+      for (let j = 0; j < rowValues.length; j++) {
+        if (startCol + j > table.colCount - 1) {
+          break;
+        }
+        let isCanChange = false;
+        if (table.isHasEditorDefine(startCol + j, startRow + i)) {
+          const editor = table.getEditor(startCol + j, startRow + i);
+          const oldValue = oldValues[i][j];
+          const value = rowValues[j];
+          const maybePromiseOrValue =
+            editor?.validateValue?.(value, oldValue, { col: startCol + j, row: startRow + i }, table) ?? true;
+          const validateResult = isPromise(maybePromiseOrValue) ? await maybePromiseOrValue : maybePromiseOrValue;
+          if (shouldCancel?.()) {
+            return changedCellResults;
+          }
+          isCanChange =
+            validateResult === true || validateResult === 'validate-exit' || validateResult === 'validate-not-exit';
+        }
+        preValidatedCellResults[i][j] = isCanChange;
+      }
+    }
+  }
+  if (shouldCancel?.() || !areTargetCellSnapshotsCurrent(table, targetSnapshots)) {
+    return changedCellResults;
+  }
+
   //#endregion
   for (let i = 0; i < values.length; i++) {
     if (startRow + i > table.rowCount - 1) {
@@ -166,7 +316,9 @@ export async function listTableChangeCellValues(
       }
       thisRowPasteColEnd = startCol + j;
       let isCanChange = false;
-      if (workOnEditableCell === false) {
+      if (preValidatedCellResults) {
+        isCanChange = preValidatedCellResults[i]?.[j] === true;
+      } else if (workOnEditableCell === false) {
         isCanChange = true;
       } else {
         if (table.isHasEditorDefine(startCol + j, startRow + i)) {
@@ -177,6 +329,9 @@ export async function listTableChangeCellValues(
             editor?.validateValue?.(value, oldValue, { col: startCol + j, row: startRow + i }, table) ?? true;
           if (isPromise(maybePromiseOrValue)) {
             const validateResult = await maybePromiseOrValue;
+            if (shouldCancel?.()) {
+              return changedCellResults;
+            }
             isCanChange =
               validateResult === true || validateResult === 'validate-exit' || validateResult === 'validate-not-exit';
           } else {
@@ -191,7 +346,8 @@ export async function listTableChangeCellValues(
       if (isCanChange) {
         changedCellResults[i][j] = true;
         const value = rowValues[j];
-        const recordIndex = table.getRecordShowIndexByCell(startCol + j, startRow + i);
+        const recordShowIndex = table.getRecordShowIndexByCell(startCol + j, startRow + i);
+        const recordIndex = recordShowIndex >= 0 ? table.dataSource.getIndexKey(recordShowIndex) : undefined;
         const { field } = table.internalProps.layoutMap.getBody(startCol + j, startRow + i);
         // const beforeChangeValue = table.getCellRawValue(startCol + j, startRow + i);
         // const oldValue = table.getCellOriginValue(startCol + j, startRow + i);
@@ -200,23 +356,40 @@ export async function listTableChangeCellValues(
         if (table.isHeader(startCol + j, startRow + i)) {
           table.internalProps.layoutMap.updateColumnTitle(startCol + j, startRow + i, value as string);
         } else {
-          table.dataSource.changeFieldValue(value, recordIndex, field, startCol + j, startRow + i, table);
+          const changeResult = table.dataSource.changeFieldValue(
+            value,
+            recordShowIndex,
+            field,
+            startCol + j,
+            startRow + i,
+            table
+          );
+          if (isPromise(changeResult)) {
+            await changeResult;
+          }
         }
         const changedValue = table.getCellOriginValue(startCol + j, startRow + i);
         if (oldValue !== changedValue && triggerEvent) {
-          table.fireListeners(TABLE_EVENT_TYPE.CHANGE_CELL_VALUE, {
+          const changeValue = {
             col: startCol + j,
             row: startRow + i,
+            recordIndex,
+            field,
             rawValue: beforeChangeValue,
             currentValue: oldValue,
             changedValue
-          });
+          };
+          table.fireListeners(TABLE_EVENT_TYPE.CHANGE_CELL_VALUE, changeValue);
+          resultChangeValues.push(changeValue);
         }
       } else {
         changedCellResults[i][j] = false;
       }
     }
     pasteColEnd = Math.max(pasteColEnd, thisRowPasteColEnd);
+  }
+  if (!noTriggerChangeCellValuesEvent) {
+    table.fireListeners(TABLE_EVENT_TYPE.CHANGE_CELL_VALUES, { values: resultChangeValues });
   }
 
   // const cell_value = table.getCellValue(col, row);
@@ -314,6 +487,106 @@ export async function listTableChangeCellValues(
   return changedCellResults;
 }
 
+/**
+ * 批量更新多个离散选区内的单元格数据。
+ * 当前仅支持将所有选区内的单元格统一修改为同一个 value。
+ */
+export async function listTableChangeCellValuesByRanges(
+  ranges: CellRange[],
+  value: string | number | null,
+  workOnEditableCell: boolean,
+  triggerEvent: boolean,
+  table: ListTable,
+  noTriggerChangeCellValuesEvent?: boolean
+) {
+  const resultChangeValues: {
+    col: number;
+    row: number;
+    recordIndex?: number | number[];
+    field?: any;
+    rawValue: string | number;
+    currentValue: string | number;
+    changedValue: string | number;
+  }[] = [];
+
+  const processed = new Set<string>();
+  const nextValue = (value ?? '') as string | number;
+
+  for (let i = 0; i < (ranges?.length ?? 0); i++) {
+    const range = ranges[i];
+    const startCol = Math.min(range.start.col, range.end.col);
+    const endCol = Math.max(range.start.col, range.end.col);
+    const startRow = Math.min(range.start.row, range.end.row);
+    const endRow = Math.max(range.start.row, range.end.row);
+
+    if (startCol > endCol || startRow > endRow) {
+      continue;
+    }
+
+    const values: (string | number)[][] = [];
+    const oldValues: (string | number)[][] = [];
+    for (let row = startRow; row <= endRow; row++) {
+      const rowValues: (string | number)[] = [];
+      const rowOldValues: (string | number)[] = [];
+      for (let col = startCol; col <= endCol; col++) {
+        rowValues.push(nextValue);
+        rowOldValues.push(table.getCellOriginValue(col, row));
+      }
+      values.push(rowValues);
+      oldValues.push(rowOldValues);
+    }
+
+    const changedCellResults = await listTableChangeCellValues(
+      startCol,
+      startRow,
+      values,
+      workOnEditableCell,
+      triggerEvent,
+      table,
+      true
+    );
+
+    for (let r = 0; r < values.length; r++) {
+      for (let c = 0; c < values[r].length; c++) {
+        const col = startCol + c;
+        const row = startRow + r;
+        const key = `${col},${row}`;
+        if (processed.has(key)) {
+          continue;
+        }
+        processed.add(key);
+
+        if (!triggerEvent || !changedCellResults?.[r]?.[c]) {
+          continue;
+        }
+
+        const oldValue = oldValues[r][c];
+        const changedValue = table.getCellOriginValue(col, row);
+        if (oldValue === changedValue) {
+          continue;
+        }
+
+        const recordShowIndex = table.getRecordShowIndexByCell(col, row);
+        const recordIndex = recordShowIndex >= 0 ? table.dataSource.getIndexKey(recordShowIndex) : undefined;
+        const { field } = table.internalProps.layoutMap.getBody(col, row);
+        resultChangeValues.push({
+          col,
+          row,
+          recordIndex,
+          field,
+          rawValue: oldValue,
+          currentValue: oldValue,
+          changedValue
+        });
+      }
+    }
+  }
+
+  if (!noTriggerChangeCellValuesEvent && triggerEvent) {
+    table.fireListeners(TABLE_EVENT_TYPE.CHANGE_CELL_VALUES, { values: resultChangeValues });
+  }
+}
+
 type CellUpdateType = 'normal' | 'sort' | 'group';
 function getCellUpdateType(
   col: number,
@@ -390,7 +663,12 @@ export function listTableAddRecord(record: any, recordIndex: number | number[], 
       table.scenegraph.clearCells();
       table.scenegraph.createSceneGraph();
     } else if (table.sortState) {
-      table.dataSource.addRecordForSorted(record);
+      const syncToOriginalRecords = !!(table.options as any)?.syncRecordOperationsToSourceRecords;
+      if (syncToOriginalRecords) {
+        (table.dataSource as any).addRecord(record, table.dataSource.records.length, true);
+      } else {
+        table.dataSource.addRecordForSorted(record);
+      }
       // 清理checkedState
       table.stateManager.checkedState.clear();
       sortRecords(table);
@@ -404,8 +682,21 @@ export function listTableAddRecord(record: any, recordIndex: number | number[], 
         recordIndex = table.dataSource.sourceLength;
       }
       const headerCount = table.transpose ? table.rowHeaderLevelCount : table.columnHeaderLevelCount;
-      table.dataSource.addRecord(record, recordIndex);
+      const syncToOriginalRecords = !!(table.options as any)?.syncRecordOperationsToSourceRecords;
+      (table.dataSource as any).addRecord(record, recordIndex, syncToOriginalRecords);
       adjustCheckBoxStateMapWithAddRecordIndex(table, recordIndex, 1);
+      if (syncToOriginalRecords) {
+        if (!table.transpose) {
+          const topAggregationCount = table.internalProps.layoutMap.hasAggregationOnTopCount;
+          const insertRowIndex = recordIndex + headerCount + topAggregationCount;
+          table.rowHeightsMap.insert(insertRowIndex);
+        }
+        table.refreshRowColCount();
+        table.internalProps.layoutMap.clearCellRangeMap();
+        table.scenegraph.clearCells();
+        table.scenegraph.createSceneGraph(true);
+        return true;
+      }
       const oldRowCount = table.rowCount;
       table.refreshRowColCount();
       if (table.scenegraph.proxy.totalActualBodyRowCount === 0) {
@@ -529,7 +820,12 @@ export function listTableAddRecords(records: any[], recordIndex: number | number
       table.scenegraph.clearCells();
       table.scenegraph.createSceneGraph();
     } else if (table.sortState) {
-      table.dataSource.addRecordsForSorted(records);
+      const syncToOriginalRecords = !!(table.options as any)?.syncRecordOperationsToSourceRecords;
+      if (syncToOriginalRecords) {
+        (table.dataSource as any).addRecords(records, table.dataSource.records.length, true);
+      } else {
+        table.dataSource.addRecordsForSorted(records);
+      }
       sortRecords(table);
       table.refreshRowColCount();
       // 更新整个场景树
@@ -543,8 +839,23 @@ export function listTableAddRecords(records: any[], recordIndex: number | number
         recordIndex = 0;
       }
       const headerCount = table.transpose ? table.rowHeaderLevelCount : table.columnHeaderLevelCount;
-      table.dataSource.addRecords(records, recordIndex);
+      const syncToOriginalRecords = !!(table.options as any)?.syncRecordOperationsToSourceRecords;
+      (table.dataSource as any).addRecords(records, recordIndex, syncToOriginalRecords);
       adjustCheckBoxStateMapWithAddRecordIndex(table, recordIndex, records.length);
+      if (syncToOriginalRecords) {
+        if (!table.transpose) {
+          const topAggregationCount = table.internalProps.layoutMap.hasAggregationOnTopCount;
+          const insertRowIndex = recordIndex + headerCount + topAggregationCount;
+          for (let i = 0; i < records.length; i++) {
+            table.rowHeightsMap.insert(insertRowIndex);
+          }
+        }
+        table.refreshRowColCount();
+        table.internalProps.layoutMap.clearCellRangeMap();
+        table.scenegraph.clearCells();
+        table.scenegraph.createSceneGraph(true);
+        return true;
+      }
       const oldRowCount = table.transpose ? table.colCount : table.rowCount;
       table.refreshRowColCount();
       if (table.scenegraph.proxy.totalActualBodyRowCount === 0) {
@@ -677,7 +988,12 @@ export function listTableDeleteRecords(recordIndexs: number[] | number[][], tabl
       table.scenegraph.clearCells();
       table.scenegraph.createSceneGraph();
     } else if (table.sortState) {
-      table.dataSource.deleteRecordsForSorted(recordIndexs as number[]);
+      const syncToOriginalRecords = !!(table.options as any)?.syncRecordOperationsToSourceRecords;
+      if (syncToOriginalRecords) {
+        (table.dataSource as any).deleteRecords(recordIndexs as number[], true);
+      } else {
+        table.dataSource.deleteRecordsForSorted(recordIndexs as number[]);
+      }
       // Note: For sorted records, checkbox state is cleared entirely (checkedState.clear())
       // So no need to adjust individual state mappings
       sortRecords(table);
@@ -686,18 +1002,42 @@ export function listTableDeleteRecords(recordIndexs: number[] | number[][], tabl
       table.scenegraph.clearCells();
       table.scenegraph.createSceneGraph();
     } else {
-      const deletedRecordIndexs = table.dataSource.deleteRecords(recordIndexs as number[]);
+      const syncToOriginalRecords = !!(table.options as any)?.syncRecordOperationsToSourceRecords;
+      const deletedRecordIndexs = (table.dataSource as any).deleteRecords(
+        recordIndexs as number[],
+        syncToOriginalRecords
+      ) as number[];
       if (deletedRecordIndexs.length === 0) {
         return;
       }
+
+      if (Array.isArray(table.options.customMergeCell)) {
+        table.internalProps.customMergeCell = getCustomMergeCellFunc(table.options.customMergeCell);
+      }
+
       // Fix: Adjust checkbox/switch state map when deleting regular records
       for (let index = 0; index < deletedRecordIndexs.length; index++) {
         adjustCheckBoxStateMapWithDeleteRecordIndex(table, deletedRecordIndexs[index], 1);
       }
+      if (syncToOriginalRecords) {
+        if (!table.transpose) {
+          const headerCount = table.transpose ? table.rowHeaderLevelCount : table.columnHeaderLevelCount;
+          const topAggregationCount = table.internalProps.layoutMap.hasAggregationOnTopCount;
+          const sorted = [...deletedRecordIndexs].sort((a, b) => b - a);
+          for (let i = 0; i < sorted.length; i++) {
+            table.rowHeightsMap.delete(sorted[i] + headerCount + topAggregationCount);
+          }
+        }
+        table.refreshRowColCount();
+        table.internalProps.layoutMap.clearCellRangeMap();
+        table.scenegraph.clearCells();
+        table.scenegraph.createSceneGraph(true);
+        return;
+      }
       const oldRowCount = table.transpose ? table.colCount : table.rowCount;
       table.refreshRowColCount();
       const newRowCount = table.transpose ? table.colCount : table.rowCount;
-      const recordIndexsMinToMax = deletedRecordIndexs.sort((a, b) => a - b);
+      const recordIndexsMinToMax = deletedRecordIndexs.sort((a: number, b: number) => a - b);
       const minRecordIndex = recordIndexsMinToMax[0];
       if (table.pagination) {
         const { perPageCount, currentPage } = table.pagination;
@@ -753,6 +1093,7 @@ export function listTableDeleteRecords(recordIndexs: number[] | number[][], tabl
               ? table.scenegraph.updateCol(delRows, [], updateRows)
               : table.scenegraph.updateRow(delRows, [], updateRows);
             table.reactCustomLayout?.updateAllCustomCell();
+            refreshCustomMergeCellGroups(table);
           }
         }
       } else {
@@ -770,6 +1111,49 @@ export function listTableDeleteRecords(recordIndexs: number[] | number[][], tabl
           }
         }
         const updateRows = [];
+        if (table.internalProps.customMergeCell) {
+          // 背景：deleteRecords 走增量更新时，只有 updateRows 会触发 updateCell 重算 merge 信息。
+          // 逻辑：根据删除位置与合并范围推导受影响的行/列区间，限制在 proxy 可视范围内更新。
+          const proxy = table.scenegraph.proxy;
+          const minRecordIndex = recordIndexsMinToMax[0];
+          const deletedIndexNums = recordIndexsMinToMax.map(
+            recordIndex => recordIndex + headerCount + topAggregationCount
+          );
+          const minIndexNum = deletedIndexNums[0];
+          let updateMin = minIndexNum;
+          let updateMax = minIndexNum;
+          if (Array.isArray((table.options as any).customMergeCell)) {
+            const merges = (table.options as any).customMergeCell as any[];
+            const axis: 'row' | 'col' = table.transpose ? 'col' : 'row';
+            merges.forEach(m => {
+              const r = m?.range;
+              if (!r?.start || !r?.end) {
+                return;
+              }
+              for (let i = 0; i < deletedIndexNums.length; i++) {
+                const deleteIndex = deletedIndexNums[i];
+                if (r.end[axis] >= deleteIndex - 1) {
+                  updateMin = Math.min(updateMin, r.start[axis]);
+                  updateMax = Math.max(updateMax, r.end[axis]);
+                  break;
+                }
+              }
+            });
+          }
+          if (table.transpose) {
+            const start = Math.max(updateMin, proxy?.colStart ?? updateMin);
+            const end = Math.min(updateMax, proxy?.colEnd ?? updateMax);
+            for (let col = start; col <= end; col++) {
+              updateRows.push({ col, row: 0 });
+            }
+          } else {
+            const start = Math.max(updateMin, proxy?.rowStart ?? updateMin);
+            const end = Math.min(updateMax, proxy?.rowEnd ?? updateMax);
+            for (let row = start; row <= end; row++) {
+              updateRows.push({ col: 0, row });
+            }
+          }
+        }
         for (let row = headerCount; row < headerCount + topAggregationCount; row++) {
           if (table.transpose) {
             updateRows.push({ col: row, row: 0 });
@@ -794,6 +1178,7 @@ export function listTableDeleteRecords(recordIndexs: number[] | number[][], tabl
           ? table.scenegraph.updateCol(delRows, [], updateRows)
           : table.scenegraph.updateRow(delRows, [], updateRows);
         table.reactCustomLayout?.updateAllCustomCell();
+        refreshCustomMergeCellGroups(table);
       }
     }
     // table.fireListeners(TABLE_EVENT_TYPE.ADD_RECORD, { row });
@@ -824,19 +1209,34 @@ export function listTableUpdateRecords(records: any[], recordIndexs: (number | n
       table.scenegraph.clearCells();
       table.scenegraph.createSceneGraph();
     } else if (table.sortState) {
-      table.dataSource.updateRecordsForSorted(records, recordIndexs as number[]);
+      const syncToOriginalRecords = !!(table.options as any)?.syncRecordOperationsToSourceRecords;
+      if (syncToOriginalRecords) {
+        (table.dataSource as any).updateRecords(records, recordIndexs as number[], true);
+      } else {
+        table.dataSource.updateRecordsForSorted(records, recordIndexs as number[]);
+      }
       sortRecords(table);
       table.refreshRowColCount();
       // 更新整个场景树
       table.scenegraph.clearCells();
       table.scenegraph.createSceneGraph();
     } else {
-      const updateRecordIndexs = table.dataSource.updateRecords(records, recordIndexs);
+      const syncToOriginalRecords = !!(table.options as any)?.syncRecordOperationsToSourceRecords;
+      const updateRecordIndexs = (table.dataSource as any).updateRecords(records, recordIndexs, syncToOriginalRecords);
       if (updateRecordIndexs.length === 0) {
         return;
       }
-      const bodyRowIndex = updateRecordIndexs.map(index => table.getBodyRowIndexByRecordIndex(index));
-      const recordIndexsMinToMax = bodyRowIndex.sort((a, b) => a - b);
+      if (syncToOriginalRecords) {
+        table.refreshRowColCount();
+        table.internalProps.layoutMap.clearCellRangeMap();
+        table.scenegraph.clearCells();
+        table.scenegraph.createSceneGraph(true);
+        return;
+      }
+      const bodyRowIndex = (updateRecordIndexs as (number | number[])[]).map((index: number | number[]) =>
+        table.getBodyRowIndexByRecordIndex(index)
+      );
+      const recordIndexsMinToMax = bodyRowIndex.sort((a: number, b: number) => a - b);
       if (table.pagination) {
         const { perPageCount, currentPage } = table.pagination;
         const headerCount = table.transpose ? table.rowHeaderLevelCount : table.columnHeaderLevelCount;
@@ -962,7 +1362,7 @@ function adjustCheckBoxStateMapWithDeleteRecordIndex(table: ListTable, recordInd
       }
     });
     //需要将targetResult按originKey排序进行升序排序，因为originKey是展示index的join，需要拆分后排序，如'1,0'，'1,0,0'要排在'0,1'及'0,1,0'后面，如'1,1'，'1,1,0'要排在1,0'，'1,0,0'后面
-    targetResult.sort((a, b) => {
+    targetResult.sort((a: { originKey: string }, b: { originKey: string }) => {
       const aArray = a.originKey.split(',');
       const bArray = b.originKey.split(',');
       const aLength = aArray.length;
@@ -1063,7 +1463,7 @@ function adjustCheckBoxStateMapWithAddRecordIndex(table: ListTable, recordIndex:
       }
     });
     //需要将targetResult按originKey排序进行降序排序，因为originKey是展示index的join，需要拆分后排序，如'1,0'，'1,0,0'要排在'0,1'及'0,1,0'前面，如'1,1'，'1,1,0'要排在1,0'，'1,0,0'前面
-    targetResult.sort((a, b) => {
+    targetResult.sort((a: { originKey: string }, b: { originKey: string }) => {
       const aArray = a.originKey.split(',');
       const bArray = b.originKey.split(',');
       const aLength = aArray.length;

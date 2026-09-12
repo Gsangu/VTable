@@ -7,6 +7,7 @@ import type { Scenegraph } from '../scenegraph';
 import { getCellMergeInfo } from '../utils/get-cell-merge';
 import { deduplication } from '../../tools/util';
 import { checkHaveTextStick, resetTextStick } from '../stick-text';
+import { computeRowsHeight } from './compute-row-height';
 
 /**
  * add and remove rows in scenegraph
@@ -68,6 +69,9 @@ export function updateRow(
 
   scene.table._clearRowRangeHeightsMap();
 
+  // verify proxy row status
+  verifyProxyRowStatus(scene);
+
   // add cells
   let updateAfter: number;
   addRows.forEach(row => {
@@ -75,6 +79,11 @@ export function updateRow(
     updateAfter = updateAfter ?? needUpdateAfter;
     rowHeightsMap.insert(row);
   });
+  const filledVisibleRowStart = fillVisibleBodyRows(scene);
+  if (isNumber(filledVisibleRowStart)) {
+    updateAfter = updateAfter ?? filledVisibleRowStart;
+    rowUpdatePos = isValid(rowUpdatePos) ? Math.min(rowUpdatePos, filledVisibleRowStart) : filledVisibleRowStart;
+  }
 
   // reset attribute y and row number in CellGroup
   // const newTotalHeight = resetRowNumberAndY(scene);
@@ -274,6 +283,40 @@ function addRow(row: number, scene: Scenegraph, skipUpdateProxy?: boolean) {
   // scene.proxy.rowEnd++;
   // scene.proxy.currentRow++;
 }
+
+function fillVisibleBodyRows(scene: Scenegraph): number | undefined {
+  const { table, proxy } = scene;
+  if (table.heightMode !== 'autoHeight') {
+    return undefined;
+  }
+  const bodyBottomRow = table.rowCount - 1 - table.bottomFrozenRowCount;
+  const visibleBodyHeight = table.tableNoFrameHeight - table.getFrozenRowsHeight() - table.getBottomFrozenRowsHeight();
+  let targetRow = Math.min(proxy.rowEnd, bodyBottomRow);
+
+  computeRowsHeight(table, proxy.rowStart, targetRow, false);
+  while (targetRow < bodyBottomRow && table.getRowsHeight(table.frozenRowCount, targetRow) < visibleBodyHeight) {
+    const nextRow = targetRow + 1;
+    computeRowsHeight(table, nextRow, nextRow, false);
+    targetRow = nextRow;
+  }
+
+  if (targetRow <= proxy.rowEnd) {
+    return undefined;
+  }
+
+  const startRow = proxy.rowEnd + 1;
+  for (let row = startRow; row <= targetRow; row++) {
+    addRowCellGroup(row, scene);
+  }
+  proxy.rowEnd = targetRow;
+  proxy.currentRow = Math.max(proxy.currentRow, targetRow);
+  proxy.totalRow = Math.max(proxy.totalRow, targetRow);
+  proxy.totalActualBodyRowCount = Math.max(proxy.totalActualBodyRowCount, targetRow - proxy.rowStart + 1);
+  proxy.rowUpdatePos = Math.min(proxy.rowUpdatePos, startRow);
+
+  return startRow;
+}
+
 function resetRowNumber(scene: Scenegraph) {
   scene.bodyGroup.forEachChildren((colGroup: Group) => {
     let rowIndex = scene.bodyRowStart;
@@ -617,5 +660,42 @@ function setRowSeriesNumberCellNeedUpdate(startUpdateRow: number, scene: Scenegr
     for (let row = startUpdateRow; row <= scene.table.rowCount - 1; row++) {
       updateCell(0, row, scene.table, false);
     }
+  }
+}
+
+function verifyProxyRowStatus(scene: Scenegraph) {
+  const proxy = scene.proxy;
+  const { rowStart, rowEnd, rowLimit, totalRow } = proxy;
+
+  if (rowStart > rowEnd) {
+    // 当前维护行全部清空, 重置proxy row状态
+    proxy.rowStart = scene.table.columnHeaderLevelCount;
+    proxy.rowEnd = Math.min(totalRow, proxy.rowStart + rowLimit - 1);
+    proxy.currentRow = 0;
+
+    return;
+  }
+
+  // 当前维护行部分清空，并且rowEnd向下已经超出范围，rowStart 需要向上更新
+  if (rowStart + rowLimit - 1 > totalRow) {
+    const oldRowStart = proxy.rowStart;
+    const newRowStart = Math.max(scene.table.columnHeaderLevelCount, totalRow - rowLimit + 1);
+
+    if (newRowStart === oldRowStart) {
+      return;
+    }
+    proxy.rowStart = newRowStart;
+    proxy.rowEnd = Math.min(totalRow, newRowStart + rowLimit - 1);
+    proxy.currentRow = proxy.rowEnd + 1;
+
+    const addRowCount = oldRowStart - proxy.rowStart;
+
+    // 补充缺失的空行
+    for (let i = 0; i < addRowCount; i++) {
+      addRowCellGroup(proxy.rowStart + i, scene);
+    }
+
+    // 更新行内容
+    proxy.rowUpdatePos = proxy.rowStart;
   }
 }

@@ -1,6 +1,439 @@
 # Change Log - @visactor/vtable
 
-This log was last generated on Wed, 17 Dec 2025 09:28:21 GMT and should not be manually modified.
+This log was last generated on Fri, 11 Sep 2026 09:49:37 GMT and should not be manually modified.
+
+## 1.26.8
+Fri, 11 Sep 2026 09:49:37 GMT
+
+### Patches
+
+- fix: prevent empty image, audio, and video cells from opening media previews (GitHub #5290)
+- fix: update nested fields by path
+- fix: prefer event clipboard data for copy and cut, fall back to it for paste when the async Clipboard API is unavailable, preserve cut source cells until paste succeeds, and normalize pasted HTML cell content (GitHub #5274)
+- fix: preserve pivot table column widths after updateOption (#5298)
+
+### Updates
+
+- feat: add themes.setDefaultTheme for application-wide default styling
+
+## 1.26.7
+Thu, 20 Aug 2026 08:02:48 GMT
+
+### Minor changes
+
+- feat: support tooltip appear delay
+- feat: add audio cell type support (GitHub #5271)
+
+### Patches
+
+- fix: prevent blank scrolling for large merged auto-height cells by keeping enough virtual rows (GitHub #3752)
+- fix: preserve tree checkbox state after row drag reorder (GitHub #3975)
+- fix: add context menu click event typing (GitHub #4655)
+- fix: avoid loading all lazy dataSource records during customRender auto size computation (GitHub #4964)
+- fix: align frame border with short frozen rows (GitHub #5277)
+- fix: keep headers after setRecords at scroll edge (GitHub #5278)
+
+### Updates
+
+- fix: render vue components in top frozen rows
+
+## 1.26.6
+Mon, 03 Aug 2026 11:18:03 GMT
+
+### Patches
+
+- fix: refresh rows when updateRecords is called without record indexes
+- fix: refresh functional icons after theme updates
+- fix: allow plugins to initialize before first render
+- fix: support updating checkbox state by record index
+
+### Updates
+
+- fix: hide row series number in aggregation rows
+- fix: delete reverse-selected rows from context menu
+
+## 1.26.5
+Wed, 15 Jul 2026 10:41:26 GMT
+
+### Updates
+
+- Render group title for single-column list tables.
+- fix: handle null table container
+
+## 1.26.4
+Mon, 06 Jul 2026 09:35:12 GMT
+
+### Minor changes
+
+- Support rendering video cells from a first-frame canvas snapshot to release video resources after loading.
+
+## 1.26.3
+Thu, 25 Jun 2026 03:15:59 GMT
+
+### Patches
+
+- fix: skip click cell after resize interaction ends
+- fix: handle scroll frozen columns width
+- fix: keep pivot row tree scroll position on toggle
+
+### Updates
+
+- fix: preserve custom layout falsy values
+- fix: handle right frozen column count update
+- fix: keep fractional row scroll target
+- fix: sync gantt task bars after sorted updates
+
+
+- fix: preserve quad style values
+
+## 1.26.2
+Tue, 16 Jun 2026 06:22:51 GMT
+
+### Patches
+
+- Fix an issue where keyboard multi-selection with Shift plus arrow keys stopped expanding after the second cell (GitHub #5146)
+
+### Updates
+
+- Merge pull request #5144 from VisActor/fix/issue-5027
+
+fix: avoid selection gap with frozen rows
+
+- fix: preserve sticky group position after toggle
+
+
+- fix: avoid selection gap with frozen rows
+
+
+- fix: preserve hidden column order after filter update
+
+
+- fix: resolve regression from #5137 fix which broke nested header drag and exposed internal state
+
+
+
+## 1.26.1
+Mon, 11 May 2026 08:51:13 GMT
+
+### Updates
+
+- fix: fill handle logic about get cell value #5096
+
+
+- fix: aggregation precisionAdd precisionSub
+
+
+- feat: add sheet formula type
+
+
+- fix: dblclickHandler not handle rightClick
+
+
+- fix: edit cell invalidateNotExit #5114
+
+
+- fix: pivot sort state show error when rows and columns have same dimension #5055
+
+
+- fix: arrow right to move select cell occor blank #5113
+
+
+- fix: when search text with tree table results error #5071
+
+
+- fix: update vue vtable packages build export files
+
+
+
+## 1.26.0
+Fri, 03 Apr 2026 03:30:13 GMT
+
+### Minor changes
+
+- feat: compatible react version 19
+
+
+
+### Patches
+
+- fix: degrade radio/checkbox cells to text in aggregation rows
+- fix: reset all interaction states on data update to avoid stale resize indicators
+
+### Updates
+
+- fix: radio cell type with rowseriesnumber error
+
+
+- fix: react19 reconciler
+
+
+- refactor: when set barToSide and visible focus should not hide scrollbar
+
+
+
+## 1.25.0
+Wed, 25 Mar 2026 08:15:12 GMT
+
+### Minor changes
+
+- feat: add option scrollFrozenCols
+
+
+
+### Updates
+
+- feat: gantt add locateIcon for taskbar
+
+
+
+## 1.24.0
+Wed, 18 Mar 2026 09:15:31 GMT
+
+### Minor changes
+
+- feat: gantt weekend column width support setting
+
+
+- feat: add undo/redo to sheet
+
+
+
+### Updates
+
+- fix: groupBy with frozenColCount and enableTreeStickCell usage problem
+
+
+- fix: when just has only one column groupTitle not show
+
+
+- fix: checkbox cell render error when set groupBy with rowSeriesNumber
+
+
+
+## 1.23.3
+Wed, 04 Mar 2026 07:23:19 GMT
+
+### Updates
+
+- fix: editor element occor error #5003
+
+
+- feat: pivotchart handle with markline value to axis range
+
+
+- fix(core): prevent memory leaks in table cleanup
+
+## 1.23.2
+Wed, 11 Feb 2026 07:00:11 GMT
+
+### Updates
+
+- feat: pivot table headerType support cellType funcitonal #4993
+
+
+- fix: fix datazoom version update
+
+
+- fix: cell formula cache error after delete row record
+
+
+- fix: masterSubTable plugin setRecordChildren fetches wrong record after sorting
+
+
+- fix: video load fail damage icon
+
+
+- fix: image url not pass should call failCallback
+
+
+- feat: add image_damage_pic and video_damage_pic type icons register & fix video damage icon ratio
+
+
+
+## 1.23.1
+Wed, 04 Feb 2026 11:50:19 GMT
+
+### Minor changes
+
+- feat: add updateOption api
+
+
+
+### Updates
+
+- fix: prepareEdit occor error #4871
+
+
+- feat: add componentLayoutOrder api #4965
+
+
+- refactor: legend and title component position calculation logic #4965
+
+
+- fix: updateOption run resize logic #4965
+
+
+- feat: optimize search latency
+
+
+- feat: add updateOption api for vtable-sheet
+
+
+- feat(table): 新增基于记录索引的单元格值修改方法及优化范围删除性能
+
+
+- feat(数据操作): 添加syncRecordOperationsToSourceRecords选项支持同步操作到源数据
+
+添加syncRecordOperationsToSourceRecords配置选项，当设置为true时，表格的增删改操作会同步到原始records数组
+修改DataSource类实现源数据同步逻辑，包括添加、删除和更新记录时对原始数据的处理
+添加相关测试用例验证同步功能
+在示例中添加同步选项的UI控制
+
+
+- fix(vtable): 修复过滤状态下新增记录位置错误问题
+
+
+- feat: 新增批量修改单元格值接口及优化筛选态数据同步
+
+refactor: 重命名 changeCellValuesByIds 为 changeCellValuesByRanges
+feat: 新增批量修改离散选区单元格值的接口 changeCellValuesByRanges
+feat: 增加 syncRecordOperationsToSourceRecords 配置支持筛选态数据同步
+feat: 新增 CHANGE_CELL_VALUES 聚合事件及相关文档
+docs: 更新接口文档和指南说明新增功能
+
+
+- fix(csv): handle escape option correctly for CSV export
+- fix: set white background for media overlay image
+
+## 1.23.0
+Thu, 29 Jan 2026 06:40:22 GMT
+
+### Minor changes
+
+- feat: add worksheet event
+
+
+
+### Updates
+
+- feat: add event system for vtable sheet #4861
+
+
+- fix: when dimension value is empty string should different from no dimension value #4935
+
+
+- fix: when no columnTree to adjust columnWidthConfig #4935
+
+
+- fix: change dimension value to recalculate totalTree #4953
+
+
+- fix: when change dimenison value should update cached changedTree value
+
+
+- fix: add records update formula
+
+
+- fix: react type define
+
+
+
+## 1.22.12
+Mon, 26 Jan 2026 02:59:13 GMT
+
+### Updates
+
+- fix: makeSelectCellVisible set false when click row series number #4942
+
+
+- feat: add cancelEditCell method to ListTable and PivotTable APIs
+
+
+- feat: add selectedStateFilter for pivotChart
+
+
+- feat: add clearChartState and disableTooltip api
+
+
+- refactor: optimize brush chart interaction
+
+
+- fix: fix last row dimension column width when row series number is enabled
+
+
+
+## 1.22.11
+Mon, 19 Jan 2026 11:52:45 GMT
+
+### Updates
+
+- refactor: when has merge cells to delete column #4848
+
+
+- refactor: update cell merge delete records logic #4848
+
+
+- fix: prepareEdit occor error #4871
+
+
+- fix: paste to table performance when has prepared edit cell #4912
+
+
+- fix: distinguish null and empty string values in column dimensions
+
+
+- fix(scenegraph): reset proxy row status when start exceeds end
+- fix: time unit computeCountToTimeScale month exactitude #4909
+
+
+- fix: 修复theme配置theme.headerStyle.textStickBaseOnAlign不生效问题
+
+
+
+## 1.22.10
+Mon, 05 Jan 2026 03:31:14 GMT
+
+### Updates
+
+- fix: prepareEdit logic occor some bug
+
+
+- fix: rose pivotchart show indicator title problem
+
+
+
+## 1.22.9
+Sun, 28 Dec 2025 05:40:27 GMT
+
+### Updates
+
+- fix: toggleSelectAll only in searched item. fix#4838
+- Revert "feat: vtable mcp cli and server"
+
+This reverts commit f0a179f7c7e277ee6179b96096f6fc71b1678e88.
+
+
+- fix: fix the issue with second-level display length
+
+
+- refactor: recognize millisecond for gantt taskbar
+
+
+- fix: pivot chart no left axis case
+
+
+- fix: show dimension tooltip delay logic error
+
+
+- refactor: when no axis compute col width logic
+
+
+- refactor: when set editCellTrigger keydown input chinese first letter problem #4847
+
+
+- fix: editor support keydown chinese #4847
+
+
 
 ## 1.22.8
 Wed, 17 Dec 2025 09:28:21 GMT

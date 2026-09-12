@@ -73,6 +73,8 @@ export interface GanttConstructorOptions {
   timelineHeader: {
     backgroundColor?: string;
     colWidth?: number;
+    hideWeekend?: boolean;
+    weekendColWidth?: number | ((colWidth: number) => number);
     /** 垂直间隔线样式 */
     verticalLine?: ILineStyle;
     /** 水平间隔线样式 */
@@ -93,6 +95,14 @@ export interface GanttConstructorOptions {
     endDateField?: string;
     /** 任务进度对应的数据字段名 */
     progressField?: string;
+    /** 基线开始日期对应的数据字段名 默认按'baselineStartDate' */
+    baselineStartDateField?: string;
+    /** 基线结束日期对应的数据字段名 默认按'baselineEndDate' */
+    baselineEndDateField?: string;
+    /** 基线样式 */
+    baselineStyle?: ITaskBarStyle | ((args: TaskBarInteractionArgumentType) => ITaskBarStyle);
+    /** 基线相对于任务条的位置：'top'|'bottom'|'overlap'，默认'bottom' */
+    baselinePosition?: 'top' | 'bottom' | 'overlap';
     /** 任务条展示文字。可以配置固定文本 或者 字符串模版`${fieldName}` */
     labelText?: ITaskBarLabelText;
     /** 任务条文字样式 */
@@ -140,6 +150,8 @@ export interface GanttConstructorOptions {
     };
     /** 数据没有排期时，可通过创建任务条排期。默认为true */
     scheduleCreatable?: boolean | ((interactionArgs: TaskBarInteractionArgumentType) => boolean);
+    /** 是否开启“任务条超出可视区”定位图标能力。默认 false */
+    locateIcon?: boolean;
     /** 针对没有分配日期的任务，可以显示出创建按钮 */
     scheduleCreation?: {
       buttonStyle?: ILineStyle & {
@@ -170,6 +182,8 @@ export interface GanttConstructorOptions {
     linkCreatingPointStyle?: IPointStyle;
     /** 创建关联线的操作线样式 */
     linkCreatingLineStyle?: ILineStyle;
+    /** 依赖关系线拐点与任务条的距离 默认20 */
+    distanceToTaskBar?: number;
   };
   /** 网格线配置 */
   grid?: IGrid;
@@ -286,6 +300,8 @@ export interface ITaskBarStyle {
 
   /** 任务条的最小尺寸 */
   minSize?: number;
+  /** 任务条距离行顶部的距离 */
+  paddingTop?: number;
 }
 export interface IMilestoneStyle {
   /** 里程碑边框颜色 */
@@ -312,6 +328,27 @@ export type ILineStyle = {
   lineWidth?: number;
   lineDash?: number[];
 };
+/** markLine style function arguments, recalculated whenever markLine is refreshed, such as after zoom changes. */
+export type IMarkLineStyleArgumentType = {
+  /** The normalized markLine date. */
+  date: Date;
+  /** The date cell index where the markLine is located. */
+  dateIndex: number;
+  /** The markLine x position in the timeline coordinate system. */
+  dateX: number;
+  /** The start x position of the date cell containing the markLine. */
+  cellStartX: number;
+  /** The current width of the date cell containing the markLine. */
+  cellWidth: number;
+  /** The current timeline column width after zoom or scale changes. */
+  timelineColWidth: number;
+  /** Current milliseconds represented by one pixel. */
+  millisecondsPerPixel: number;
+};
+export type IMarkLineStyle = Omit<ILineStyle, 'lineWidth'> & {
+  lineWidth?: number | ((args: IMarkLineStyleArgumentType) => number);
+};
+export type IMarkLineStyleFunction = (args: IMarkLineStyleArgumentType) => IMarkLineStyle;
 export type IPointStyle = {
   strokeColor?: string;
   strokeWidth?: number;
@@ -329,7 +366,7 @@ export interface IMarkLine {
     backgroundColor?: string;
     cornerRadius?: number | number[];
   };
-  style?: ILineStyle;
+  style?: IMarkLineStyle | IMarkLineStyleFunction;
   /** 标记线显示在日期列下的位置 默认为'left' */
   position?: 'left' | 'right' | 'middle' | 'date';
   /** 自动将日期范围内 包括改标记线 */

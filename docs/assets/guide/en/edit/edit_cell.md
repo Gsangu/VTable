@@ -184,6 +184,35 @@ VTable.register.editor('custom-date', custom_date_editor);
 
 In the above example, we created a custom editor named `DateEditor` and implemented the methods required by the `IEditor` interface. Then, we register the custom editor into the VTable through the `VTable.register.editor` method for use in the table.
 
+### Handling popup DOM from third-party components
+
+When a custom editor uses third-party components such as Select, Cascader, DatePicker, or Tooltip, the popup DOM may not be mounted inside the editor container. Many component libraries append popups to `body` through portal/teleport. In this case, when the user clicks a popup option, the click target is outside the editor container from VTable's perspective, and the editor may exit too early.
+
+It is recommended to configure a stable class on the popup root element and let `isEditorElement` check both the editor container and the popup DOM:
+
+```ts
+const editorPopupClassName = 'vtable-editor-popup';
+
+isEditorElement(target: HTMLElement) {
+  return this.element.contains(target) || this.isClickPopUp(target);
+}
+
+isClickPopUp(target: HTMLElement) {
+  let current: HTMLElement | null = target;
+  while (current) {
+    if (current.classList?.contains(editorPopupClassName)) {
+      return true;
+    }
+    current = current.parentNode as HTMLElement | null;
+  }
+  return false;
+}
+```
+
+Different component libraries expose different props for popup class names. For example, React Arco Select can use `dropdownMenuClassName`, Vue Arco Select can use `triggerProps.contentClass`, and Ant Design Select can use `classNames.popup.root` or `popupClassName` in older versions. See the React and Vue Arco Select custom editor demos for complete examples.
+
+If the third-party component has a close animation after selection, or if its internal implementation affects the order of `onChange` and blur events, update the editor's current value in the component change callback before calling `endEdit`. This prevents `getValue` from reading the old value.
+
 `IEditor` [definition](https://github.com/VisActor/VTable/blob/main/packages/vtable-editors/src/types.ts)：
 
 ```ts
@@ -302,7 +331,25 @@ At the same time, when pasting cell data, the validation function `validateValue
 ```ts
 interface ListTableAPI {
   /** Set the value of the cell. Note that it corresponds to the original value of the source data, and the vtable instance records will be modified accordingly */
-  changeCellValue: (col: number, row: number, value: string | number | null, workOnEditableCell = false) => void;
+  changeCellValue: (
+    col: number,
+    row: number,
+    value: string | number | null,
+    workOnEditableCell?: boolean,
+    triggerEvent?: boolean,
+    noTriggerChangeCellValuesEvent?: boolean
+  ) => void;
+  /**
+   * Batch update data of multiple selected ranges.
+   * Currently it only supports setting all cells in the ranges to the same value.
+   */
+  changeCellValuesByRanges: (
+    ranges: CellRange[],
+    value: string | number | null,
+    workOnEditableCell?: boolean,
+    triggerEvent?: boolean,
+    noTriggerChangeCellValuesEvent?: boolean
+  ) => void;
   /**
    * Batch update data of multiple cells
    * @param col The starting column number of pasted data
@@ -310,13 +357,22 @@ interface ListTableAPI {
    * @param values Data array of multiple cells
    * @param workOnEditableCell just can change editable cells
    */
-  changeCellValues(startCol: number, startRow: number, values: string[][], workOnEditableCell = false);
+  changeCellValues: (
+    startCol: number,
+    startRow: number,
+    values: string[][],
+    workOnEditableCell?: boolean,
+    triggerEvent?: boolean,
+    noTriggerChangeCellValuesEvent?: boolean
+  ) => void;
   /** Get the editor of cell configuration */
   getEditor: (col: number, row: number) => IEditor;
   /** Enable cell editing */
   startEditCell: (col?: number, row?: number, value?: string | number) => void;
   /** End editing */
   completeEditCell: () => void;
+  /** Cancel editing */
+  cancelEditCell: () => void;
   // ...
 }
 ```

@@ -168,9 +168,14 @@ const { isTouchEvent } = event;
 const rangeReg = /^\$(\d+)\$(\d+)$/;
 importStyle();
 
+function normalizeCellType(cellType: ColumnTypeOption | undefined | null): ColumnTypeOption {
+  return isValid(cellType) ? cellType : 'text';
+}
+
 export abstract class BaseTable extends EventTarget implements BaseTableAPI {
   internalProps: IBaseTableProtected;
   showFrozenIcon = true;
+  _scrollToRowCorrectTimer: ReturnType<typeof setTimeout> | null = null;
   padding: { top: number; left: number; right: number; bottom: number };
   globalDropDownMenu?: MenuListItem[] | ((args: { row: number; col: number; table: BaseTableAPI }) => MenuListItem[]);
   //画布绘制单元格的区域 不包括整体边框frame，所以比canvas的width和height要小一点（canvas的width包括了frame）
@@ -178,6 +183,10 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
   tableNoFrameHeight: number;
   tableX: number;
   tableY: number;
+  _tableBorderWidth_left: number = 0;
+  _tableBorderWidth_right: number = 0;
+  _tableBorderWidth_top: number = 0;
+  _tableBorderWidth_bottom: number = 0;
   _widthMode: WidthModeDef;
   _heightMode: HeightModeDef;
   _autoFillWidth: boolean;
@@ -244,11 +253,25 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
   rotateDegree?: number;
   constructor(container: HTMLElement, options: BaseTableConstructorOptions = {}) {
     super();
-
+    if (typeof window !== 'undefined') {
+      const g: any = window as any;
+      g[this.id] = this;
+      const registry =
+        g.__vtable__ ||
+        (g.__vtable__ = {
+          byId: Object.create(null),
+          list: [],
+          last: null
+        });
+      registry.byId[this.id] = this;
+      registry.list.push(this);
+      registry.last = this;
+      g.__vtable_last_id__ = this.id;
+    }
     if (Env.mode === 'node') {
       options = container as BaseTableConstructorOptions;
       container = null;
-    } else if (!(container instanceof HTMLElement)) {
+    } else if (container && !(container instanceof HTMLElement)) {
       options = container as BaseTableConstructorOptions;
       if ((container as BaseTableConstructorOptions).container) {
         container = (container as BaseTableConstructorOptions).container;
@@ -391,12 +414,22 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
       internalProps.focusControl = new FocusInput(this, internalProps.element);
       internalProps.canvas = this.options.canvas;
       internalProps.context = internalProps.canvas.getContext('2d')!;
+      (internalProps.canvas as any).__vtable__ = this;
+      (internalProps.canvas as any).__vtable_id__ = this.id;
+      if (internalProps.element) {
+        (internalProps.element as any).__vtable__ = this;
+        (internalProps.element as any).__vtable_id__ = this.id;
+      }
     } else if (Env.mode !== 'node') {
       internalProps.element = createRootElement(this.padding);
       internalProps.focusControl = new FocusInput(this, internalProps.element);
       internalProps.canvas = document.createElement('canvas');
       internalProps.element.appendChild(internalProps.canvas);
       internalProps.context = internalProps.canvas.getContext('2d')!;
+      (internalProps.canvas as any).__vtable__ = this;
+      (internalProps.canvas as any).__vtable_id__ = this.id;
+      (internalProps.element as any).__vtable__ = this;
+      (internalProps.element as any).__vtable_id__ = this.id;
 
       if (options.customConfig?.createReactContainer) {
         createReactContainer(this);
@@ -474,7 +507,7 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
     internalProps.focusedTable = false;
     internalProps.theme = themes.of(options.theme ?? themes.DEFAULT); //原来在listTable文件中
     internalProps.theme.isPivot = this.isPivotTable();
-    setIconColor(internalProps.theme.functionalIconsStyle);
+    this._updateFunctionalIcons();
     if (container) {
       // 先清空
       if (clearDOM) {
@@ -680,12 +713,42 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
   }
   resize() {
     this._updateSize();
-    this.internalProps.legends?.forEach(legend => {
-      legend?.resize();
+    // 组件布局优先级仅影响 title/legend 的布局与可用绘制区域缩减顺序
+    const layoutOrder = this.options.componentLayoutOrder ?? ['legend', 'title'];
+    //先布局orient为bottom或right的组件
+    layoutOrder.forEach(component => {
+      if (component === 'legend') {
+        this.internalProps.legends?.forEach(legend => {
+          if (legend.orient === 'bottom' || legend.orient === 'right') {
+            legend?.resize();
+          }
+        });
+      } else if (component === 'title') {
+        if (
+          this.internalProps.title?._titleOption.orient === 'bottom' ||
+          this.internalProps.title?._titleOption.orient === 'right'
+        ) {
+          this.internalProps.title?.resize();
+        }
+      }
     });
-    if (this.internalProps.title) {
-      this.internalProps.title.resize();
-    }
+    //后布局orient为top或left的组件
+    layoutOrder.forEach(component => {
+      if (component === 'legend') {
+        this.internalProps.legends?.forEach(legend => {
+          if (legend.orient === 'top' || legend.orient === 'left') {
+            legend?.resize();
+          }
+        });
+      } else if (component === 'title') {
+        if (
+          this.internalProps.title?._titleOption.orient === 'top' ||
+          this.internalProps.title?._titleOption.orient === 'left'
+        ) {
+          this.internalProps.title?.resize();
+        }
+      }
+    });
     if (this.internalProps.emptyTip) {
       this.internalProps.emptyTip.resize();
     }
@@ -739,7 +802,7 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
     // 纠正frozenColCount的值;
     const maxFrozenWidth = this._getMaxFrozenWidth();
     // if (this.tableNoFrameWidth - this.getColsWidth(0, frozenColCount - 1) <= 120) {
-    if (this.getColsWidth(0, frozenColCount - 1) > maxFrozenWidth) {
+    if (!this.options.scrollFrozenCols && this.getColsWidth(0, frozenColCount - 1) > maxFrozenWidth) {
       if (this.internalProps.unfreezeAllOnExceedsMaxWidth) {
         this.internalProps.frozenColCount = 0;
       } else {
@@ -760,7 +823,7 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
     //纠正frozenColCount的值
     const maxFrozenWidth = this._getMaxFrozenWidth();
     // if (this.tableNoFrameWidth - this.getColsWidth(0, frozenColCount - 1) <= 120) {
-    if (this.getColsWidth(0, frozenColCount - 1) > maxFrozenWidth) {
+    if (!this.options.scrollFrozenCols && this.getColsWidth(0, frozenColCount - 1) > maxFrozenWidth) {
       if (this.internalProps.unfreezeAllOnExceedsMaxWidth) {
         this.internalProps.frozenColCount = 0;
       } else {
@@ -1053,6 +1116,10 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
     const maxFrozenWidth = this.options.maxFrozenWidth ?? '80%';
     return _toPxWidth(this, maxFrozenWidth);
   }
+  _getMaxRightFrozenWidth(): number {
+    const maxRightFrozenWidth = this.options.maxRightFrozenWidth ?? this.options.maxFrozenWidth ?? '80%';
+    return _toPxWidth(this, maxRightFrozenWidth);
+  }
   _getComputedFrozenColCount(frozenColCount: number): number {
     const maxFrozenWidth = this._getMaxFrozenWidth();
     let computedfrozenColCount = frozenColCount;
@@ -1251,25 +1318,29 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
       //考虑表格整体边框的问题
       const lineWidths = toBoxArray(this.internalProps.theme.frameStyle?.borderLineWidth ?? [null]);
       const shadowWidths = toBoxArray(this.internalProps.theme.frameStyle?.shadowBlur ?? [0]);
+      this._tableBorderWidth_left = (lineWidths[3] ?? 0) + (shadowWidths[3] ?? 0);
+      this._tableBorderWidth_right = (lineWidths[1] ?? 0) + (shadowWidths[1] ?? 0);
+      this._tableBorderWidth_top = (lineWidths[0] ?? 0) + (shadowWidths[0] ?? 0);
+      this._tableBorderWidth_bottom = (lineWidths[2] ?? 0) + (shadowWidths[2] ?? 0);
       if (this.theme.frameStyle?.innerBorder) {
         this.tableX += this.contentOffsetX;
         this.tableY += this.contentOffsetY;
         this.tableNoFrameWidth = width - (shadowWidths[1] ?? 0) - this.contentOffsetX;
         this.tableNoFrameHeight = height - (shadowWidths[2] ?? 0) - this.contentOffsetY;
       } else {
-        this.tableX += (lineWidths[3] ?? 0) + (shadowWidths[3] ?? 0);
-        this.tableY += (lineWidths[0] ?? 0) + (shadowWidths[0] ?? 0);
-        const rightBorder = (lineWidths[1] ?? 0) + (shadowWidths[1] ?? 0);
+        this.tableX += this._tableBorderWidth_left;
+        this.tableY += this._tableBorderWidth_top;
+        const rightBorder = this._tableBorderWidth_right;
         this.tableNoFrameWidth =
           width -
           (rightBorder > vScrollBarWidth ? rightBorder - vScrollBarWidth : 0) -
-          ((lineWidths[3] ?? 0) + (shadowWidths[3] ?? 0)) -
+          this._tableBorderWidth_left -
           this.contentOffsetX;
-        const bottomBorder = (lineWidths[2] ?? 0) + (shadowWidths[2] ?? 0);
+        const bottomBorder = this._tableBorderWidth_bottom;
         this.tableNoFrameHeight =
           height -
           (bottomBorder > hScrollBarWidth ? bottomBorder - hScrollBarWidth : 0) -
-          ((lineWidths[0] ?? 0) + (shadowWidths[0] ?? 0)) -
+          this._tableBorderWidth_top -
           this.contentOffsetY;
       }
     }
@@ -2040,7 +2111,11 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
       relativeY = false;
     }
     const cellRect = this.getCellRect(col, row);
-    return this._toRelativeRect(cellRect, relativeX, relativeY);
+    const rect = this._toRelativeRect(cellRect, relativeX, relativeY);
+    if (isFrozenCell?.col && !this.isRightFrozenColumn(col, row)) {
+      rect.offsetLeft(-this.getFrozenColsScrollLeft());
+    }
+    return rect;
   }
   /**
    * 获取的位置是相对表格显示界面的左上角
@@ -2060,7 +2135,7 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
       } else if (isFrozenCell?.row) {
         relativeY = false;
       }
-      return this._toRelativeRect(
+      const rect = this._toRelativeRect(
         this.getCellsRect(
           (<CellRange>range).start.col,
           (<CellRange>range).start.row,
@@ -2070,6 +2145,10 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
         relativeX,
         relativeY
       );
+      if (isFrozenCell?.col && !this.isRightFrozenColumn((<CellRange>range).start.col, (<CellRange>range).start.row)) {
+        rect.offsetLeft(-this.getFrozenColsScrollLeft());
+      }
+      return rect;
     }
     const cellRange = this.getCellRange((<CellAddress>range).col, (<CellAddress>range).row);
     const isFrozenCell = this.isFrozenCell((<CellAddress>range).col, (<CellAddress>range).row);
@@ -2083,11 +2162,15 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
     } else if (isFrozenCell?.row) {
       relativeY = false;
     }
-    return this._toRelativeRect(
+    const rect = this._toRelativeRect(
       this.getCellsRect(cellRange.start.col, cellRange.start.row, cellRange.end.col, cellRange.end.row),
       relativeX,
       relativeY
     );
+    if (isFrozenCell?.col && !this.isRightFrozenColumn((<CellAddress>range).col, (<CellAddress>range).row)) {
+      rect.offsetLeft(-this.getFrozenColsScrollLeft());
+    }
+    return rect;
   }
   /**
    *  即仅视觉看到的位置 获取的位置是相对表格显示界面的左上角
@@ -2390,7 +2473,7 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
     const { scrollTop, scrollLeft } = this;
     const width = this.tableNoFrameWidth;
     const height = this.tableNoFrameHeight;
-    return new Rect(scrollLeft, scrollTop, width, height);
+    return new Rect(scrollLeft + this.getFrozenColsOffset(), scrollTop, width, height);
   }
   /**
    * 获取网格中完全可见的可滚动行数。不包括表头及冻结的行
@@ -2424,20 +2507,26 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
   /** 获取表格body部分的显示单元格范围 */
   getBodyVisibleCellRange() {
     const { scrollTop, scrollLeft } = this;
-    const frozenRowsHeight = this.getFrozenRowsHeight();
-    const frozenColsWidth = this.getFrozenColsWidth();
+    const frozenColsContentWidth = this.getFrozenColsContentWidth();
+    const frozenColsOffset = this.getFrozenColsOffset();
     const bottomFrozenRowsHeight = this.getBottomFrozenRowsHeight();
     const rightFrozenColsWidth = this.getRightFrozenColsWidth();
+    const frozenHeaderHeight =
+      this.frozenRowCount > this.columnHeaderLevelCount ? this.getRowsHeight(0, this.columnHeaderLevelCount - 1) : 0;
     // 计算非冻结
-    const { row: rowStart } = this.getRowAt(scrollTop + frozenRowsHeight + 1);
-    const { col: colStart } = this.getColAt(scrollLeft + frozenColsWidth + 1);
+    const rowStart = Math.max(this.getTargetRowAt(scrollTop + 1)?.row ?? -1, this.frozenRowCount);
+    const { col: colStart } = this.getColAt(scrollLeft + frozenColsContentWidth + 1);
     const rowEnd =
       this.getAllRowsHeight() > this.tableNoFrameHeight
-        ? this.getRowAt(scrollTop + this.tableNoFrameHeight - 1 - bottomFrozenRowsHeight).row
+        ? Math.max(
+            this.getTargetRowAt(scrollTop + this.tableNoFrameHeight - 1 - bottomFrozenRowsHeight - frozenHeaderHeight)
+              ?.row ?? -1,
+            rowStart
+          )
         : this.rowCount - 1;
     const colEnd =
       this.getAllColsWidth() > this.tableNoFrameWidth
-        ? this.getColAt(scrollLeft + this.tableNoFrameWidth - 1 - rightFrozenColsWidth).col
+        ? this.getColAt(scrollLeft + frozenColsOffset + this.tableNoFrameWidth - 1 - rightFrozenColsWidth).col
         : this.colCount - 1;
     if (colEnd < 0 || rowEnd < 0) {
       return null;
@@ -2452,13 +2541,19 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
    */
   getBodyVisibleRowRange(start_deltaY: number = 0, end_deltaY: number = 0) {
     const { scrollTop } = this;
-    const frozenRowsHeight = this.getFrozenRowsHeight();
     const bottomFrozenRowsHeight = this.getBottomFrozenRowsHeight();
+    const frozenHeaderHeight =
+      this.frozenRowCount > this.columnHeaderLevelCount ? this.getRowsHeight(0, this.columnHeaderLevelCount - 1) : 0;
     // 计算非冻结
-    const { row: rowStart } = this.getRowAt(scrollTop + frozenRowsHeight + 1 + start_deltaY);
+    const rowStart = Math.max(this.getTargetRowAt(scrollTop + 1 + start_deltaY)?.row ?? -1, this.frozenRowCount);
     const rowEnd =
       this.getAllRowsHeight() > this.tableNoFrameHeight
-        ? this.getRowAt(scrollTop + this.tableNoFrameHeight - 1 - bottomFrozenRowsHeight + end_deltaY).row
+        ? Math.max(
+            this.getTargetRowAt(
+              scrollTop + this.tableNoFrameHeight - 1 - bottomFrozenRowsHeight - frozenHeaderHeight + end_deltaY
+            )?.row ?? -1,
+            rowStart
+          )
         : this.rowCount - 1;
     if (rowEnd < 0) {
       return null;
@@ -2473,14 +2568,16 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
    */
   getBodyVisibleColRange(start_deltaX: number = 0, end_deltaX: number = 0) {
     const { scrollLeft } = this;
-    const frozenColsWidth = this.getFrozenColsWidth();
+    const frozenColsContentWidth = this.getFrozenColsContentWidth();
+    const frozenColsOffset = this.getFrozenColsOffset();
     const rightFrozenColsWidth = this.getRightFrozenColsWidth();
     // 计算非冻结
-    const { col: colStart } = this.getColAt(scrollLeft + frozenColsWidth + 1 + start_deltaX);
+    const { col: colStart } = this.getColAt(scrollLeft + frozenColsContentWidth + 1 + start_deltaX);
 
     const colEnd =
       this.getAllColsWidth() > this.tableNoFrameWidth
-        ? this.getColAt(scrollLeft + this.tableNoFrameWidth - 1 - rightFrozenColsWidth + end_deltaX).col
+        ? this.getColAt(scrollLeft + frozenColsOffset + this.tableNoFrameWidth - 1 - rightFrozenColsWidth + end_deltaX)
+            .col
         : this.colCount - 1;
     if (colEnd < 0) {
       return null;
@@ -2494,8 +2591,7 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
   get visibleColCount(): number {
     const { frozenColCount } = this;
     const visibleRect = this.getVisibleRect();
-    const visibleLeft =
-      frozenColCount > 0 ? visibleRect.left + this.getColsWidth(0, frozenColCount - 1) : visibleRect.left;
+    const visibleLeft = frozenColCount > 0 ? visibleRect.left + this.getFrozenColsWidth() : visibleRect.left;
 
     const initCol = this.getTargetColAt(visibleLeft);
     if (!initCol) {
@@ -2567,15 +2663,69 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
   private dispose() {
     this.release();
   }
+
+  clearCorrectTimer() {
+    if (this._scrollToRowCorrectTimer) {
+      clearTimeout(this._scrollToRowCorrectTimer);
+      this._scrollToRowCorrectTimer = null;
+    }
+  }
+
   /**
    * Dispose the table instance.
    * @returns {void}
    */
   release(): void {
-    const internalProps = this.internalProps;
+    if (typeof window !== 'undefined') {
+      const g: any = window as any;
+      if (g?.[this.id] === this) {
+        delete g[this.id];
+      } else if (g?.[this.id]) {
+        g[this.id] = null;
+      }
+      const registry = g?.__vtable__;
+      if (registry?.byId?.[this.id] === this) {
+        delete registry.byId[this.id];
+      }
+      const list = registry?.list;
+      if (Array.isArray(list) && list.length) {
+        for (let i = list.length - 1; i >= 0; i--) {
+          if (list[i] === this) {
+            list.splice(i, 1);
+          }
+        }
+      }
+      if (registry?.last === this) {
+        registry.last = Array.isArray(list) && list.length ? list[list.length - 1] : null;
+      }
+      if (g?.__vtable_last_id__ === this.id) {
+        g.__vtable_last_id__ = registry?.last?.id ?? null;
+      }
+    }
     if (this.isReleased) {
       return;
     }
+    // for memory leak of VRender Event
+    this.scenegraph?.component?.vScrollBar?.release();
+    this.scenegraph?.component?.hScrollBar?.release();
+    this.animationManager.clear();
+    this.animationManager.ticker.release();
+    if (this.scenegraph?.stageOwned) {
+      this.scenegraph?.stage?.ticker?.release();
+    }
+
+    const internalProps = this.internalProps;
+    const canvas = internalProps?.canvas as any;
+    if (canvas?.__vtable__ === this) {
+      delete canvas.__vtable__;
+      delete canvas.__vtable_id__;
+    }
+    const element = internalProps?.element as any;
+    if (element?.__vtable__ === this) {
+      delete element.__vtable__;
+      delete element.__vtable_id__;
+    }
+    this.clearCorrectTimer();
     internalProps.tooltipHandler?.release?.();
     internalProps.menuHandler?.release?.();
 
@@ -2598,7 +2748,7 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
       internalProps.releaseList = null;
     }
 
-    this.scenegraph.stage.release();
+    this.scenegraph.releaseStage();
     this.scenegraph.proxy.release();
 
     const parentElement = internalProps.element?.parentElement;
@@ -2646,7 +2796,7 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
       defaultRowHeight = 40,
       defaultHeaderRowHeight,
       defaultColWidth = 80,
-      defaultHeaderColWidth = 80,
+      defaultHeaderColWidth,
       keyboardOptions,
       eventOptions,
       rowSeriesNumber,
@@ -2792,7 +2942,7 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
 
     internalProps.theme = themes.of(options.theme ?? themes.DEFAULT);
     internalProps.theme.isPivot = this.isPivotTable();
-    setIconColor(internalProps.theme.functionalIconsStyle);
+    this._updateFunctionalIcons();
     this.scenegraph.updateStageBackground();
     // this._updateSize();
     //设置是否自动撑开的配置
@@ -2940,8 +3090,28 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
    * @returns
    */
   getFrozenColsWidth(): number {
-    const w = this.getColsWidth(0, this.frozenColCount - 1);
-    return w;
+    const contentWidth = this.getFrozenColsContentWidth();
+    // frozenColsWidth 表示“冻结区域视口宽度”，可能小于冻结列内容总宽。
+    // 当开启 scrollFrozenCols 时，冻结区域会限制到 maxFrozenWidth，并允许在冻结区域内部横向滚动来查看超出部分。
+    if (!this.options.scrollFrozenCols) {
+      return contentWidth;
+    }
+    const maxFrozenWidth = this._getMaxFrozenWidth();
+    return Math.min(contentWidth, maxFrozenWidth);
+  }
+  getFrozenColsContentWidth(): number {
+    // 冻结列内容总宽（不受 maxFrozenWidth 限制）
+    return this.getColsWidth(0, this.frozenColCount - 1);
+  }
+  getFrozenColsOffset(): number {
+    // 冻结区域可滚动的最大距离（内容宽 - 视口宽），用于计算滚动条范围与边界判断
+    const contentWidth = this.getFrozenColsContentWidth();
+    const viewportWidth = this.getFrozenColsWidth();
+    return Math.max(0, contentWidth - viewportWidth);
+  }
+  getFrozenColsScrollLeft(): number {
+    // 左冻结区域内部的横向滚动位置（像素值）
+    return this.stateManager.scroll.frozenHorizontalBarPos ?? 0;
   }
   /**
    * 获取底部冻结固定列总宽
@@ -2963,8 +3133,17 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
    * @returns
    */
   getRightFrozenColsWidth(): number {
+    const contentWidth = this.getRightFrozenColsContentWidth();
+    // rightFrozenColsWidth 表示“右侧冻结区域视口宽度”。
+    // 当开启 scrollRightFrozenCols 时，右侧冻结区域会限制到 maxRightFrozenWidth，并允许在右冻结区域内部横向滚动。
+    if (!this.options.scrollRightFrozenCols) {
+      return contentWidth;
+    }
+    const maxRightFrozenWidth = this._getMaxRightFrozenWidth();
+    return Math.min(contentWidth, maxRightFrozenWidth);
+  }
+  getRightFrozenColsContentWidth(): number {
     if (this.rightFrozenColCount > 0) {
-      // const width = this.getColsWidth(this.colCount - this.rightFrozenColCount, this.colCount - 1); // 同getBottomFrozenRowsHeight的原因
       let width = 0;
       for (let col = this.colCount - this.rightFrozenColCount; col <= this.colCount - 1; col++) {
         width += this.getColWidth(col);
@@ -2972,6 +3151,16 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
       return width;
     }
     return 0;
+  }
+  getRightFrozenColsOffset(): number {
+    // 右侧冻结区域可滚动的最大距离（内容宽 - 视口宽）
+    const contentWidth = this.getRightFrozenColsContentWidth();
+    const viewportWidth = this.getRightFrozenColsWidth();
+    return Math.max(0, contentWidth - viewportWidth);
+  }
+  getRightFrozenColsScrollLeft(): number {
+    // 右冻结区域内部的横向滚动位置（像素值）
+    return this.stateManager.scroll.rightFrozenHorizontalBarPos ?? 0;
   }
   /**
    * 获取实际绘制范围的宽高，而非可绘制画布大小
@@ -3231,7 +3420,12 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
    * @param enableCtrlSelectMode 是否按住 ctrl 键
    * @param enableShiftSelectMode 是否按住 shift 键
    */
-  startDragSelectCol(colIndex: number, enableCtrlSelectMode?: boolean, enableShiftSelectMode?: boolean) {
+  startDragSelectCol(
+    colIndex: number,
+    enableCtrlSelectMode?: boolean,
+    enableShiftSelectMode?: boolean,
+    makeSelectCellVisible?: boolean
+  ) {
     const lastSelectRange = this.stateManager.select.ranges[this.stateManager.select.ranges.length - 1];
     const startCol = enableShiftSelectMode && lastSelectRange?.start?.col ? lastSelectRange?.start?.col : colIndex;
     const startRow = 0;
@@ -3243,7 +3437,7 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
       enableShiftSelectMode,
       enableCtrlSelectMode,
       false,
-      this.options.select?.makeSelectCellVisible ?? true,
+      makeSelectCellVisible,
       true
     );
     this.stateManager.updateInteractionState(InteractionState.grabing);
@@ -3253,16 +3447,18 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
       enableShiftSelectMode,
       enableCtrlSelectMode,
       false,
-      this.options.select?.makeSelectCellVisible ?? true,
+      makeSelectCellVisible,
       true
     );
+    //防止触发到pointertap事件执行endSelectCells方法 会导致select.ranges被合并扩大范围
+    this.stateManager.select.selecting = false;
   }
   /**
    * 拖拽选择列. 当结合插件table-series-number使用时，需要使用这个方法来拖拽选择整列
    * @param colIndex 列索引
    * @param enableCtrlSelectMode 是否按住 ctrl 键
    */
-  dragSelectCol(colIndex: number, enableCtrlSelectMode?: boolean) {
+  dragSelectCol(colIndex: number, enableCtrlSelectMode?: boolean, makeSelectCellVisible?: boolean) {
     const currentSelectRanges = this.stateManager.select.ranges;
     const lastSelectRange = currentSelectRanges[currentSelectRanges.length - 1];
     if (lastSelectRange) {
@@ -3274,16 +3470,19 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
       false,
       enableCtrlSelectMode,
       false,
-      this.options.select?.makeSelectCellVisible ?? true,
+      makeSelectCellVisible,
       true
     );
+    //防止触发到pointertap事件执行endSelectCells方法 会导致select.ranges被合并扩大范围
+    this.stateManager.select.selecting = false;
   }
   /**
    * 结束拖拽选择列. 当结合插件table-series-number使用时，需要使用这个方法来结束拖拽选择整列或者整行
    */
   endDragSelect() {
     this.stateManager.updateInteractionState(InteractionState.default);
-    this.stateManager.endSelectCells(false, false);
+    //上面方法dragSelectCol和startDragSelectCol方法中已经设置了select.selecting = false，所以这里不需要再调用endSelectCells方法
+    // this.stateManager.endSelectCells(false, false);
   }
 
   /**
@@ -3292,7 +3491,12 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
    * @param enableCtrlSelectMode 是否按住 ctrl 键
    * @param isShift 是否按住 shift 键
    */
-  startDragSelectRow(rowIndex: number, enableCtrlSelectMode?: boolean, isShift?: boolean) {
+  startDragSelectRow(
+    rowIndex: number,
+    enableCtrlSelectMode?: boolean,
+    isShift?: boolean,
+    makeSelectCellVisible?: boolean
+  ) {
     const lastSelectRange = this.stateManager.select.ranges[this.stateManager.select.ranges.length - 1];
     const startCol = 0;
     const startRow = isShift && lastSelectRange?.start?.row ? lastSelectRange?.start?.row : rowIndex;
@@ -3304,7 +3508,7 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
       isShift,
       enableCtrlSelectMode,
       false,
-      this.options.select?.makeSelectCellVisible ?? true,
+      makeSelectCellVisible,
       true
     );
     this.stateManager.updateInteractionState(InteractionState.grabing);
@@ -3314,30 +3518,147 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
       isShift,
       enableCtrlSelectMode,
       false,
-      this.options.select?.makeSelectCellVisible ?? true,
+      makeSelectCellVisible,
       true
     );
+    //防止触发到pointertap事件执行endSelectCells方法 会导致select.ranges被合并扩大范围
+    this.stateManager.select.selecting = false;
   }
   /**
    * 拖拽选择行. 当结合插件table-series-number使用时，需要使用这个方法来拖拽选择整行
    * @param rowIndex 行索引
    * @param isCtrl 是否按住 ctrl 键
    */
-  dragSelectRow(rowIndex: number, isCtrl?: boolean) {
+  dragSelectRow(rowIndex: number, isCtrl?: boolean, makeSelectCellVisible?: boolean) {
     const currentSelectRanges = this.stateManager.select.ranges;
     const lastSelectRange = currentSelectRanges[currentSelectRanges.length - 1];
     if (lastSelectRange) {
       lastSelectRange.end.row = rowIndex;
     }
-    this.stateManager.updateSelectPos(
-      this.colCount - 1,
-      rowIndex,
-      false,
-      isCtrl,
-      false,
-      this.options.select?.makeSelectCellVisible ?? true,
-      true
-    );
+    this.stateManager.updateSelectPos(this.colCount - 1, rowIndex, false, isCtrl, false, makeSelectCellVisible, true);
+    //防止触发到pointertap事件执行endSelectCells方法 会导致select.ranges被合并扩大范围
+    this.stateManager.select.selecting = false;
+  }
+
+  changeHeaderPosition(args: {
+    source: CellAddress;
+    target: CellAddress;
+    movingColumnOrRow?: 'column' | 'row';
+  }): boolean {
+    if (
+      !('canMoveHeaderPosition' in this.internalProps.layoutMap) ||
+      this.options.customConfig?.notUpdateInColumnRowMove === true
+    ) {
+      return false;
+    }
+    const prevMoving = this.stateManager.columnMove.movingColumnOrRow;
+    this.stateManager.columnMove.movingColumnOrRow = args.movingColumnOrRow;
+    try {
+      if (this.internalProps.layoutMap.canMoveHeaderPosition?.(args.source, args.target) === false) {
+        return false;
+      }
+      const oldSourceMergeInfo = this.getCellRange(args.source.col, args.source.row);
+      const oldTargetMergeInfo = this.getCellRange(args.target.col, args.target.row);
+      const moveContext = this._moveHeaderPosition(args.source, args.target);
+      if (!moveContext || moveContext.targetIndex === moveContext.sourceIndex) {
+        return false;
+      }
+      this.internalProps.useOneRowHeightFillAll = false;
+      this.internalProps.layoutMap.clearCellRangeMap();
+      const sourceMergeInfo = this.getCellRange(args.source.col, args.source.row);
+      const targetMergeInfo = this.getCellRange(args.target.col, args.target.row);
+
+      const colMin = Math.min(
+        sourceMergeInfo.start.col,
+        targetMergeInfo.start.col,
+        oldSourceMergeInfo.start.col,
+        oldTargetMergeInfo.start.col
+      );
+      const colMax = Math.max(
+        sourceMergeInfo.end.col,
+        targetMergeInfo.end.col,
+        oldSourceMergeInfo.end.col,
+        oldTargetMergeInfo.end.col
+      );
+      const rowMin = Math.min(
+        sourceMergeInfo.start.row,
+        targetMergeInfo.start.row,
+        oldSourceMergeInfo.start.row,
+        oldTargetMergeInfo.start.row
+      );
+      let rowMax = Math.max(
+        sourceMergeInfo.end.row,
+        targetMergeInfo.end.row,
+        oldSourceMergeInfo.end.row,
+        oldTargetMergeInfo.end.row
+      );
+      if (
+        moveContext.moveType === 'row' &&
+        (this.internalProps.layoutMap as PivotHeaderLayoutMap).rowHierarchyType === 'tree'
+      ) {
+        if (moveContext.targetIndex > moveContext.sourceIndex) {
+          rowMax = rowMax + moveContext.targetSize - 1;
+        } else {
+          rowMax = rowMax + moveContext.sourceSize - 1;
+        }
+      }
+
+      if (
+        this.isListTable() &&
+        !(this as unknown as ListTableAPI).transpose &&
+        (this.isSeriesNumberInBody(args.source.col, args.source.row) || args.movingColumnOrRow === 'row')
+      ) {
+        const listTable = this as unknown as ListTableAPI;
+        const sourceRecordPath = listTable.getRecordIndexByCell(args.source.col, moveContext.sourceIndex);
+        const targetRecordPath = listTable.getRecordIndexByCell(args.target.col, moveContext.targetIndex);
+        this.changeRecordOrder(moveContext.sourceIndex, moveContext.targetIndex);
+        this.stateManager.changeCheckboxOrder(sourceRecordPath, targetRecordPath);
+        this.stateManager.changeRadioOrder(sourceRecordPath, targetRecordPath);
+      }
+
+      if (moveContext.moveType === 'column') {
+        for (let col = colMin; col <= colMax; col++) {
+          this._clearColRangeWidthsMap(col);
+        }
+      } else {
+        for (let row = rowMin; row <= rowMax; row++) {
+          this._clearRowRangeHeightsMap(row);
+        }
+      }
+
+      this.clearCellStyleCache();
+      if (this.isSeriesNumberInBody(args.source.col, args.source.row) || args.movingColumnOrRow === 'row') {
+        this.scenegraph.updateHeaderPosition(
+          this.scenegraph.proxy.colStart,
+          this.scenegraph.proxy.colEnd,
+          this.scenegraph.proxy.rowStart,
+          this.scenegraph.proxy.rowEnd,
+          moveContext.moveType
+        );
+      } else if (moveContext.moveType === 'column') {
+        this.scenegraph.updateHeaderPosition(colMin, colMax, 0, -1, moveContext.moveType);
+      } else {
+        this.scenegraph.updateHeaderPosition(0, -1, rowMin, rowMax, moveContext.moveType);
+      }
+
+      if (this.internalProps.frozenColDragHeaderMode === 'adjustFrozenCount' && this.isListTable()) {
+        if (this.isLeftFrozenColumn(args.target.col) && !this.isLeftFrozenColumn(args.source.col)) {
+          this.frozenColCount += sourceMergeInfo.end.col - sourceMergeInfo.start.col + 1;
+        } else if (this.isLeftFrozenColumn(args.source.col) && !this.isLeftFrozenColumn(args.target.col)) {
+          this.frozenColCount -= sourceMergeInfo.end.col - sourceMergeInfo.start.col + 1;
+        }
+        if (this.isRightFrozenColumn(args.target.col) && !this.isRightFrozenColumn(args.source.col)) {
+          this.rightFrozenColCount += sourceMergeInfo.end.col - sourceMergeInfo.start.col + 1;
+        } else if (this.isRightFrozenColumn(args.source.col) && !this.isRightFrozenColumn(args.target.col)) {
+          this.rightFrozenColCount -= sourceMergeInfo.end.col - sourceMergeInfo.start.col + 1;
+        }
+      }
+
+      this.scenegraph.updateNextFrame?.();
+      return true;
+    } finally {
+      this.stateManager.columnMove.movingColumnOrRow = prevMoving;
+    }
   }
 
   abstract isListTable(): boolean;
@@ -3471,6 +3792,12 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
   /**
    * 获取当前使用的主题
    */
+  private _updateFunctionalIcons() {
+    setIconColor(this.internalProps.theme.functionalIconsStyle);
+    this.internalProps.headerHelper?.updateIcons();
+    this.internalProps.bodyHelper?.updateIcons();
+    this.internalProps.rowSeriesNumberHelper?.updateIcons();
+  }
   get theme(): TableTheme {
     return this.internalProps.theme;
   }
@@ -3478,7 +3805,7 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
     this.internalProps.theme = themes.of(theme ?? themes.DEFAULT);
     this.internalProps.theme.isPivot = this.isPivotTable();
     this.options.theme = theme;
-    setIconColor(this.internalProps.theme.functionalIconsStyle);
+    this._updateFunctionalIcons();
   }
   /**
    * 设置主题
@@ -3487,7 +3814,7 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
     const oldHoverState = { col: this.stateManager.hover.cellPos.col, row: this.stateManager.hover.cellPos.row };
     this.internalProps.theme = themes.of(theme ?? themes.DEFAULT);
     this.internalProps.theme.isPivot = this.isPivotTable();
-    setIconColor(this.internalProps.theme.functionalIconsStyle);
+    this._updateFunctionalIcons();
     this.options.theme = theme;
     this.scenegraph.updateComponent();
     this.scenegraph.updateStageBackground();
@@ -3520,19 +3847,23 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
 
   getBodyColumnType(col: number, row: number): ColumnTypeOption {
     const cellType = this.internalProps.layoutMap.getBody(col, row)?.cellType ?? 'text';
-    return getProp('cellType', { cellType }, col, row, this);
+    return normalizeCellType(getProp('cellType', { cellType }, col, row, this));
   }
 
   getCellType(col: number, row: number): ColumnTypeOption {
     let cellType;
     if (this.isSeriesNumberInHeader(col, row)) {
-      return (this.internalProps.layoutMap as SimpleHeaderLayoutMap).getSeriesNumberHeader(col, row).cellType;
+      const seriesHeaderCellType = (this.internalProps.layoutMap as SimpleHeaderLayoutMap).getSeriesNumberHeader(
+        col,
+        row
+      ).cellType;
+      return normalizeCellType(seriesHeaderCellType === 'radio' ? 'text' : seriesHeaderCellType);
     } else if (this.isHeader(col, row)) {
       cellType = (this.internalProps.layoutMap.getHeader(col, row) as HeaderData).headerType;
     } else {
       cellType = this.internalProps.layoutMap.getBody(col, row).cellType;
     }
-    return getProp('cellType', { cellType }, col, row, this);
+    return normalizeCellType(getProp('cellType', { cellType }, col, row, this));
   }
 
   /**
@@ -3661,6 +3992,7 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
             col: Math.min(customMerge.range.end.col, this.colCount - 1),
             row: Math.min(customMerge.range.end.row, this.rowCount - 1)
           },
+          // 标记为 custom merge range：编辑、history 等逻辑可据此区分“自定义合并”与 layoutMap 合并。
           isCustom: true
         };
         return range;
@@ -3678,8 +4010,8 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
       const customMerge = this.internalProps.customMergeCell(col, row, this);
       if (
         customMerge &&
-        customMerge.range &&
-        (isValid(customMerge.text) || customMerge.customLayout || this.customRender)
+        customMerge.range
+        // (isValid(customMerge.text) || customMerge.customLayout || this.customRender)
       ) {
         if (customMerge.style) {
           const styleClass = this.internalProps.bodyHelper.getStyleClass('text');
@@ -4940,13 +5272,47 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
     return undefined;
   }
 
+  getTargetScrollTop(row: number) {
+    const drawRange = this.getDrawRange();
+    const frozenHeight = this.getFrozenRowsHeight();
+    return Math.max(
+      0,
+      Math.min(this.getRowsHeight(0, row - 1) - frozenHeight, this.getAllRowsHeight() - drawRange.height)
+    );
+  }
+
+  private _scheduleScrollToRowCorrect(row: number, delay: number = 0) {
+    this._scrollToRowCorrectTimer = setTimeout(() => {
+      this.clearCorrectTimer();
+      const targetScrollTop = this.getTargetScrollTop(row);
+      if (targetScrollTop !== this.scrollTop) {
+        this.scrollTop = targetScrollTop;
+        // 设置scrollTop后bodyRowStart/bodyRowEnd可能变化，导致scrollTop值不准确, 因此在设置一次scrollTop
+        const correctedTargetScrollTop = this.getTargetScrollTop(row);
+        if (correctedTargetScrollTop !== this.scrollTop) {
+          this.scrollTop = correctedTargetScrollTop;
+        }
+      }
+    }, delay);
+  }
+
   // anmiation
   scrollToRow(row: number, animationOption?: ITableAnimationOption | boolean) {
+    const targetRow = Math.min(Math.max(row, 0), this.rowCount - 1);
+    const targetRowInt = Math.floor(targetRow);
+    this.clearCorrectTimer();
     if (!animationOption) {
-      this.scrollToCell({ row });
+      this.scrollToCell({ row: targetRowInt });
+      this._scheduleScrollToRowCorrect(targetRowInt);
       return;
     }
-    this.animationManager.scrollTo({ row }, animationOption);
+    const duration = !isBoolean(animationOption) ? animationOption?.duration ?? 3000 : 3000;
+    this.animationManager.scrollTo({ row: targetRow }, animationOption);
+    if (targetRowInt === targetRow) {
+      this._scrollToRowCorrectTimer = setTimeout(() => {
+        this.scrollToRow(targetRowInt, false);
+      }, duration);
+    }
   }
   scrollToCol(col: number, animationOption?: ITableAnimationOption | boolean) {
     if (!animationOption) {
@@ -4973,8 +5339,15 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
     }
     if (isValid(cellAddr.row) && cellAddr.row >= this.frozenRowCount) {
       const frozenHeight = this.getFrozenRowsHeight();
-      const top = this.getRowsHeight(0, cellAddr.row - 1);
-      this.scrollTop = Math.min(top - frozenHeight, this.getAllRowsHeight() - drawRange.height);
+      // Use rowHeightsMap.getSumInRange directly to bypass the getRowsHeight fast path,
+      // which ignores rowHeightsMap for body rows and uses defaultRowHeight*count instead.
+      // This ensures dynamically-computed row heights (e.g. autoWrapText) are reflected
+      // in the scroll position calculation.
+      const top = this.rowHeightsMap.getSumInRange(0, cellAddr.row - 1);
+      this.scrollTop = Math.min(
+        top - frozenHeight,
+        this.rowHeightsMap.getSumInRange(0, this.rowCount - 1) - drawRange.height
+      );
     }
     this.render();
   }
@@ -5027,5 +5400,27 @@ export abstract class BaseTable extends EventTarget implements BaseTableAPI {
       }
     }
     return false;
+  }
+  /** 更新某个单元格内容 ,重新渲染不会更新。 这个接口也仅是更新而非渲染*/
+  updateCellContent(col: number, row: number) {
+    this.scenegraph.updateCellContent(col, row);
+  }
+
+  /** 更新某个区域单元格内容 ,重新渲染不会更新。 这个接口也仅是更新而非渲染*/
+  updateCellContentRange(startCol: number, startRow: number, endCol: number, endRow: number) {
+    for (let i = startCol; i <= endCol; i++) {
+      for (let j = startRow; j <= endRow; j++) {
+        this.scenegraph.updateCellContent(i, j);
+      }
+    }
+  }
+
+  /** 更新某个区域单元格内容 ,重新渲染不会更新。 这个接口也仅是更新而非渲染*/
+  updateCellContentRanges(ranges: CellRange[]) {
+    //ranges中每个range都调用updateCellContent
+    for (let i = 0; i < ranges.length; i++) {
+      const range = ranges[i];
+      this.updateCellContentRange(range.start.col, range.start.row, range.end.col, range.end.row);
+    }
   }
 }

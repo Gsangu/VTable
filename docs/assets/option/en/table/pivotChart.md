@@ -49,6 +49,10 @@ The currently supported data formats are, taking the sales of large supermarkets
 ]
 ```
 
+## dataConfig(IPivotTableDataConfig)
+
+PivotChart supports the PivotTable data analysis configuration. When totals are configured, use `totals.row.grandTotalDimensions` or `totals.column.grandTotalDimensions` to create grouped grand totals by retained lower-level dimensions.
+
 ## columnTree(Array)
 
 List header tree, type:`(IDimensionHeaderNode|IIndicatorHeaderNode)[]`. Among them, IDimensionHeaderNode refers to the dimension value node of the dimension non-indicator, and IIndicatorHeaderNode refers to the indicator name node.
@@ -205,6 +209,13 @@ export interface PivotChartConstructorOptions {
       right?: LineAxisAttributes['labelHoverOnAxis'];
       top?: LineAxisAttributes['labelHoverOnAxis'];
     };
+    selectedStateFilter?: (datum: any) => boolean;
+    selectedReverseStateFilter?: (datum: any) => boolean;
+    inBrushStateFilter?: (datum: any) => boolean;
+    outOfBrushStateFilter?: (datum: any) => boolean;
+    listenBrushChange?: boolean;
+    brushChangeDelay?: number;
+    clearChartState?: () => void;
   };
 }
 ```
@@ -213,6 +224,13 @@ export interface PivotChartConstructorOptions {
 - heightLimitToShowTooltipForEdgeRow: for bar chart, line chart, etc., when displaying tooltip for an entire column, it is detected that the first row and the last row may be occluded by scrolling and only a part of it is displayed. The minimum height allowed to display the tooltip is detected.
 - widthLimitToShowTooltipForEdgeColumn: for horizontal bar chart, when displaying tooltip for an entire row, it is detected that the first column and the last column may be occluded by scrolling and only a part of it is displayed. The minimum width allowed to display the tooltip is detected.
 - labelHoverOnAxis: the related configuration of the floating label label on the axis when the mouse hovers over the perspective chart. Supports configuration for the left, right, top, and bottom four directions.
+- selectedStateFilter: the filter function for the high-light state of the clicked element in the associated chart
+- selectedReverseStateFilter: the filter function for the reverse high-light state of the clicked element in the associated chart
+- inBrushStateFilter: the filter function for the brush high-light state of the element in the associated chart
+- outOfBrushStateFilter: the filter function for the out of brush high-light state of the element in the associated chart
+- listenBrushChange: whether to listen to the brushChange event, default is false
+- brushChangeDelay: the delay time for the brushChange event. The throttle is used to prevent frequent triggering of the chart, default is 100 milliseconds
+- clearChartState: the function to clear the chart state
 
 Example configuration:
 ```

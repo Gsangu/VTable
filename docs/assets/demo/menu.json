@@ -315,6 +315,13 @@
           }
         },
         {
+          "path": "gantt-locate-taskbar",
+          "title": {
+            "zh": "任务条定位（超出可视区）",
+            "en": "Task Bar Locate"
+          }
+        },
+        {
           "path": "gantt-customLayout",
           "title": {
             "zh": "甘特图自定义渲染",
@@ -438,6 +445,13 @@
           "title": {
             "zh": "甘特图缩放滚动条",
             "en": "Gantt DataZoomAxis Scrollbar"
+          }
+        },
+        {
+          "path": "gantt-baseline",
+          "title": {
+            "zh": "甘特图基线任务条",
+            "en": "Gantt Baseline Bar"
           }
         }
       ]
@@ -910,6 +924,13 @@
           "title": {
             "zh": "滚动",
             "en": "scroll"
+          }
+        },
+        {
+          "path": "scroll-frozen",
+          "title": {
+            "zh": "冻结区可滚动",
+            "en": "Scroll frozen area"
           }
         },
         {
@@ -1833,7 +1854,24 @@
             "zh": "产品对比表",
             "en": "Product Compare Table"
           }
+        },
+        {
+          "path": "personnel-info",
+          "title": {
+            "zh": "人员信息表",
+            "en": "Personnel Information Sheet"
+          },
+          "meta": {
+            "title": "Personnel Information Sheet",
+            "keywords": "personnel, phone mask, privacy, icon, click",
+            "category": "demo",
+            "group": "Business",
+            "cover": "https://lf9-dp-fe-cms-tos.byteorg.com/obj/bit-cloud/VTable/preview/personnel-info.gif",
+            "link": "'../../guide/custom_define/custom_icon'",
+            "option": ""
+          }
         }
+
       ]
     }
   ]

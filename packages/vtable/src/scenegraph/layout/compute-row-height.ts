@@ -139,14 +139,13 @@ export function computeRowsHeight(
       ) {
         // check fixed style and no wrap situation, fill all row width single compute
         // traspose table and row indicator pivot table cannot use single row height
-        const height = computeRowHeight(table.columnHeaderLevelCount, 0, table.colCount - 1, table);
-        fillRowsHeight(
-          height,
-          table.columnHeaderLevelCount,
-          table.rowCount - 1 - table.bottomFrozenRowCount,
-          table,
-          update ? newHeights : undefined
-        );
+        const fillStartRow = table.columnHeaderLevelCount;
+        const fillEndRow = table.rowCount - 1 - table.bottomFrozenRowCount;
+        const rowForCompute = getFirstUnresizedRow(table, fillStartRow, fillEndRow);
+        if (rowForCompute >= 0) {
+          const height = computeRowHeight(rowForCompute, 0, table.colCount - 1, table);
+          fillRowsHeight(height, fillStartRow, fillEndRow, table, update ? newHeights : undefined);
+        }
         //底部冻结的行行高需要单独计算
         for (let row = table.rowCount - table.bottomFrozenRowCount; row <= rowEnd; row++) {
           const height = computeRowHeight(row, 0, table.colCount - 1, table);
@@ -352,6 +351,20 @@ export function computeRowsHeight(
 }
 
 export function computeRowHeight(row: number, startCol: number, endCol: number, table: BaseTableAPI): number {
+  if (table.internalProps._heightResizedRowMap.has(row)) {
+    return table.getRowHeight(row);
+  }
+
+  return computeRowHeightInternal(row, startCol, endCol, table, true);
+}
+
+function computeRowHeightInternal(
+  row: number,
+  startCol: number,
+  endCol: number,
+  table: BaseTableAPI,
+  enableCustomCompute: boolean
+): number {
   const isAllRowsAuto =
     table.isAutoRowHeight(row) || (table.heightMode === 'adaptive' && table.options.autoHeightInAdaptiveMode !== false);
   if (!isAllRowsAuto && table.getDefaultRowHeight(row) !== 'auto') {
@@ -359,16 +372,32 @@ export function computeRowHeight(row: number, startCol: number, endCol: number, 
   }
 
   let maxHeight;
-  if (table.options.customComputeRowHeight) {
-    const customRowHeight = table.options.customComputeRowHeight({
+  if (enableCustomCompute && table.options.customComputeRowHeight) {
+    let realHeight: number;
+    let hasRealHeight = false;
+    const getRealHeight = () => {
+      if (!hasRealHeight) {
+        realHeight = computeRowHeightInternal(row, startCol, endCol, table, false);
+        hasRealHeight = true;
+      }
+      return realHeight;
+    };
+    const computeArgs = {
       row,
       table
+    } as Parameters<NonNullable<BaseTableAPI['options']['customComputeRowHeight']>>[0];
+    Object.defineProperty(computeArgs, 'realHeight', {
+      get: getRealHeight,
+      enumerable: false,
+      configurable: true
     });
+    const customRowHeight = table.options.customComputeRowHeight(computeArgs);
     if (typeof customRowHeight === 'number') {
       return customRowHeight;
-    } else if (customRowHeight !== 'auto') {
-      return table.getDefaultRowHeight(row) as number;
+    } else if (customRowHeight === 'auto') {
+      return getRealHeight();
     }
+    return table.getDefaultRowHeight(row) as number;
   }
   if (table.internalProps.rowHeightConfig) {
     const rowHeightConfig = table.internalProps.rowHeightConfig.find((item: { key: number }) => item.key === row);
@@ -447,9 +476,8 @@ export function computeRowHeight(row: number, startCol: number, endCol: number, 
     ) {
       continue;
     }
-    const cellType = table.isHeader(col, row)
-      ? (table._getHeaderLayoutMap(col, row) as HeaderData)?.headerType
-      : table.getBodyColumnType(col, row);
+
+    const cellType = table.getCellType(col, row);
     // if ( isValid(cellType) && cellType !== 'text' && cellType !== 'link' && cellType !== 'progressbar' && cellType !== 'checkbox') {
     //   // text&link&progressbar测量文字宽度
     //   // image&video&sparkline使用默认宽度
@@ -582,6 +610,9 @@ function fillRowsHeight(
     return;
   }
   for (let row = startRow; row <= endRow; row++) {
+    if (table.internalProps._heightResizedRowMap.has(row)) {
+      continue;
+    }
     if (newHeights) {
       newHeights[row] = height;
     } else {
@@ -589,6 +620,15 @@ function fillRowsHeight(
     }
   }
   table.internalProps.useOneRowHeightFillAll = true;
+}
+
+function getFirstUnresizedRow(table: BaseTableAPI, startRow: number, endRow: number): number {
+  for (let row = startRow; row <= endRow; row++) {
+    if (!table.internalProps._heightResizedRowMap.has(row)) {
+      return row;
+    }
+  }
+  return -1;
 }
 
 /**
@@ -615,11 +655,12 @@ function computeCustomRenderHeight(col: number, row: number, table: BaseTableAPI
       cellRange = table.getCellRange(col, row);
       spanRow = cellRange.end.row - cellRange.start.row + 1;
     }
+    const skipCellValue = shouldSkipCustomRenderCellValueForComputation(col, row, table);
     const arg = {
       col: cellRange?.start.col ?? col,
       row: cellRange?.start.row ?? row,
-      dataValue: table.getCellOriginValue(col, row),
-      value: table.getCellValue(col, row) || '',
+      dataValue: skipCellValue ? undefined : table.getCellOriginValue(col, row),
+      value: skipCellValue ? undefined : table.getCellValue(col, row),
       rect: getCellRect(col, row, table),
       table,
       originCol: col,
@@ -660,11 +701,17 @@ function computeCustomRenderHeight(col: number, row: number, table: BaseTableAPI
       height += padding[0] + padding[2];
     }
     return {
-      height: height / spanRow,
+      height: getMergedCellSingleRowHeight(height / spanRow, spanRow, table),
       renderDefault
     };
   }
   return undefined;
+}
+
+function shouldSkipCustomRenderCellValueForComputation(col: number, row: number, table: BaseTableAPI) {
+  return (
+    table.isListTable() && !table.isHeader(col, row) && !(table.internalProps.dataSource as any)?.dataSourceObj?.records
+  );
 }
 
 /**
@@ -900,7 +947,20 @@ function computeTextHeight(col: number, row: number, cellType: ColumnTypeOption,
       }
     }
   }
-  return (Math.max(maxHeight, iconHeight) + padding[0] + padding[2]) / spanRow;
+  return getMergedCellSingleRowHeight(
+    (Math.max(maxHeight, iconHeight) + padding[0] + padding[2]) / spanRow,
+    spanRow,
+    table
+  );
+}
+
+function getMergedCellSingleRowHeight(height: number, spanRow: number, table: BaseTableAPI) {
+  if (spanRow <= 1) {
+    return height;
+  }
+  const configuredMinHeight = table.options.customConfig?.minSingleRowHeight;
+  const minSingleRowHeight = isNumber(configuredMinHeight) && configuredMinHeight > 0 ? configuredMinHeight : 2;
+  return Math.max(height, minSingleRowHeight);
 }
 
 function getCellRect(col: number, row: number, table: BaseTableAPI) {

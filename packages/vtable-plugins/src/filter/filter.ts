@@ -2,7 +2,7 @@ import { TABLE_EVENT_TYPE, TYPES } from '@visactor/vtable';
 import { FilterEngine } from './filter-engine';
 import { FilterStateManager } from './filter-state-manager';
 import { FilterToolbar } from './filter-toolbar';
-import type { FilterOptions, FilterConfig, FilterState, FilterAction } from './types';
+import type { FilterOptions, FilterConfig, FilterState, FilterAction, FilterStateSnapshot } from './types';
 import { FilterActionType } from './types';
 import type {
   ListTableConstructorOptions,
@@ -31,7 +31,9 @@ export class FilterPlugin implements pluginsDefinition.IVTablePlugin {
     TABLE_EVENT_TYPE.CHANGE_CELL_VALUE,
     TABLE_EVENT_TYPE.UPDATE_RECORD,
     TABLE_EVENT_TYPE.ADD_RECORD,
-    TABLE_EVENT_TYPE.DELETE_RECORD
+    TABLE_EVENT_TYPE.DELETE_RECORD,
+    TABLE_EVENT_TYPE.ADD_COLUMN,
+    TABLE_EVENT_TYPE.DELETE_COLUMN
   ];
 
   pluginOptions: FilterOptions;
@@ -76,17 +78,20 @@ export class FilterPlugin implements pluginsDefinition.IVTablePlugin {
     this.filterEngine = new FilterEngine(this.pluginOptions);
     this.filterStateManager = new FilterStateManager(this.table, this.filterEngine);
     this.filterToolbar = new FilterToolbar(this.table, this.filterStateManager, this.pluginOptions);
+    // BEFORE_INIT 阶段 table.columns 可能还不可用，先缓存本次 options.columns 作为 getCurrentColumns 的回退值。
     this.columns = eventArgs.options.columns;
 
     this.filterToolbar.render(document.body);
-    this.updateFilterIcons(this.columns);
+    this.updateFilterIcons(this.getCurrentColumns());
     this.filterStateManager.subscribe((_: FilterState, action?: FilterAction) => {
       // 新增筛选配置时，不需要更新筛选图标以及表格
       if (action?.type === FilterActionType.ADD_FILTER) {
         return;
       }
-      this.updateFilterIcons(this.columns);
-      (this.table as ListTable).updateColumns(this.columns, {
+      const currentColumns = this.getCurrentColumns();
+      this.columns = currentColumns;
+      this.updateFilterIcons(currentColumns);
+      (this.table as ListTable).updateColumns(currentColumns, {
         clearRowHeightCache: false
       });
     });
@@ -127,10 +132,6 @@ export class FilterPlugin implements pluginsDefinition.IVTablePlugin {
         this.filterToolbar.hide(eventArgs.col, eventArgs.row);
       } else {
         this.filterToolbar.show(col, row, this.pluginOptions.filterModes);
-        this.table.fireListeners(TABLE_EVENT_TYPE.FILTER_MENU_SHOW, {
-          col: eventArgs.col,
-          row: eventArgs.row
-        });
       }
     } else if (runtime === TABLE_EVENT_TYPE.SCROLL) {
       if (eventArgs.scrollDirection === 'horizontal') {
@@ -142,9 +143,33 @@ export class FilterPlugin implements pluginsDefinition.IVTablePlugin {
     } else if (runtime === TABLE_EVENT_TYPE.UPDATE_RECORD) {
       this.syncFilterWithTableData();
     } else if (runtime === TABLE_EVENT_TYPE.ADD_RECORD) {
+      // #region 为了解决“ 已处于筛选状态时插入新行（尤其是空数组 [] 这种草稿行），后续再点一次筛选确认/切换其他列筛选后，这条新行会莫名其妙消失，甚至导致看起来全被过滤掉 ”的问题。
+      // 解决思路：
+      // 当触发 ADD_RECORD 事件且当前已经有激活筛选时
+      // 把这次新增的 record(s) 逐个 markForceVisibleRecord
+      // 让它们在后续 updateFilterRules 重新筛选时不会立刻被刷掉，从而“草稿行可见、可继续编辑”
+      const hasActiveFilter = this.filterStateManager?.getActiveFilterFields?.().length > 0;
+      if (hasActiveFilter && Array.isArray(eventArgs?.records)) {
+        const ds: any = (this.table as any).dataSource;
+        eventArgs.records.forEach((r: any) => ds?.markForceVisibleRecord?.(r));
+      }
+      // #endregion
       this.syncFilterWithTableData();
     } else if (runtime === TABLE_EVENT_TYPE.DELETE_RECORD) {
       this.syncFilterWithTableData();
+    } else if (runtime === TABLE_EVENT_TYPE.ADD_COLUMN) {
+      const columnIndex = eventArgs?.columnIndex;
+      const columnCount = eventArgs?.columnCount;
+      if (typeof columnIndex === 'number' && typeof columnCount === 'number' && columnCount > 0) {
+        this.filterStateManager?.shiftFieldsOnAddColumns?.(columnIndex, columnCount);
+      }
+      this.reapplyActiveFilters();
+    } else if (runtime === TABLE_EVENT_TYPE.DELETE_COLUMN) {
+      const deleteColIndexs = eventArgs?.deleteColIndexs;
+      if (Array.isArray(deleteColIndexs) && deleteColIndexs.length > 0) {
+        this.filterStateManager?.shiftFieldsOnDeleteColumns?.(deleteColIndexs);
+      }
+      this.reapplyActiveFilters();
     }
   }
 
@@ -153,6 +178,20 @@ export class FilterPlugin implements pluginsDefinition.IVTablePlugin {
     this.pluginOptions = merge(this.pluginOptions, pluginOptions);
     // 更新筛选器UI样式
     this.filterToolbar.updateStyles(this.pluginOptions.styles);
+    // 更新icon
+    const currentColumns = this.getCurrentColumns();
+    this.columns = currentColumns;
+    (this.table as ListTable).updateColumns(currentColumns, {
+      clearRowHeightCache: false
+    });
+  }
+
+  getFilterSnapshot(): FilterStateSnapshot {
+    return this.filterStateManager?.getSnapshot?.() ?? { filters: [] };
+  }
+
+  applyFilterSnapshot(snapshot: FilterStateSnapshot): void {
+    this.filterStateManager?.applySnapshot?.(snapshot, FilterActionType.APPLY_FILTERS);
   }
 
   // 当用户的配置项更新时调用
@@ -190,6 +229,21 @@ export class FilterPlugin implements pluginsDefinition.IVTablePlugin {
 
     // 更新筛选图标
     this.updateFilterIcons(options.columns);
+  }
+
+  private getCurrentColumns(): ColumnsDefine {
+    if (this.table?.isListTable?.()) {
+      const optionColumns = (this.table as ListTable).options?.columns;
+      if (optionColumns?.length) {
+        return optionColumns;
+      }
+      try {
+        return (this.table as ListTable).columns;
+      } catch (error) {
+        // BEFORE_INIT 阶段 ListTable 的 layoutMap 可能尚未建立，回退到最近一次缓存的 columns。
+      }
+    }
+    return this.columns ?? [];
   }
 
   /**

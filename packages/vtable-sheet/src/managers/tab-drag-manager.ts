@@ -93,8 +93,8 @@ export default class SheetTabDragManager {
     // 清理拖拽状态
     this.cleanupDragState();
     // 移除全局事件监听
-    document.removeEventListener('mousemove', (e: MouseEvent) => this.handleGlobalMouseMove(e));
-    document.removeEventListener('mouseup', (e: MouseEvent) => this.handleGlobalMouseUp(e));
+    document.removeEventListener('mousemove', this.boundMouseMove);
+    document.removeEventListener('mouseup', this.boundMouseUp);
   }
 
   /**
@@ -289,10 +289,7 @@ export default class SheetTabDragManager {
    */
   performTabReorder(sourceKey: string, targetKey: string, position: 'left' | 'right'): void {
     try {
-      this.sheet.getSheetManager().reorderSheet(sourceKey, targetKey, position);
-      // 更新UI
-      this.sheet.updateSheetTabs();
-      this.sheet.updateSheetMenu();
+      this.sheet.reorderSheet(sourceKey, targetKey, position);
     } catch (error) {
       console.error('Tab reorder failed:', error);
     }

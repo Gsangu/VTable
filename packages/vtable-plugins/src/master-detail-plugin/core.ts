@@ -8,11 +8,11 @@ import { EventManager } from './events';
 import { SubTableManager } from './subtable';
 import { TableAPIExtensions } from './table-api-extensions';
 import { bindMasterDetailCheckboxChange } from './checkbox';
-
+import type { pluginsDefinition } from '@visactor/vtable';
 /**
  * 主从表插件核心类
  */
-export class MasterDetailPlugin implements VTable.plugins.IVTablePlugin {
+export class MasterDetailPlugin implements pluginsDefinition.IVTablePlugin {
   id = `Master Detail Plugin`;
   name = 'Master Detail Plugin';
   runTime = [
@@ -69,7 +69,7 @@ export class MasterDetailPlugin implements VTable.plugins.IVTablePlugin {
    */
   private initializeManagers(): void {
     this.configManager = new ConfigManager(this.pluginOptions, this.table);
-    this.eventManager = new EventManager(this.table);
+    this.eventManager = new EventManager(this.table, this.configManager.getChildrenKey());
     const enableCheckboxCascade = this.pluginOptions.enableCheckboxCascade ?? true;
     this.subTableManager = new SubTableManager(this.table, enableCheckboxCascade);
 
@@ -171,11 +171,37 @@ export class MasterDetailPlugin implements VTable.plugins.IVTablePlugin {
       collapseRow: (rowIndex: number) => this.collapseRow(rowIndex),
       updateSubTablePositions: () => this.subTableManager.recalculateAllSubTablePositions(),
       updateRowHeightForExpand: (rowIndex: number, deltaHeight: number) =>
-        this.updateRowHeightForExpand(rowIndex, deltaHeight)
+        this.updateRowHeightForExpand(rowIndex, deltaHeight),
+      resetMasterDetailStateBeforeSetRecords: () => this.resetMasterDetailStateBeforeSetRecords()
     });
 
     // 执行API扩展
     this.tableAPIExtensions.extendTableAPI();
+  }
+
+  /**
+   * setRecords 前清理旧主从表状态，避免新数据复用旧展开行和子表实例
+   */
+  private resetMasterDetailStateBeforeSetRecords(): void {
+    const internalProps = getInternalProps(this.table);
+    const expandedRows = [...this.eventManager.getExpandedRows()];
+    expandedRows.forEach(rowIndex => {
+      try {
+        this.collapseRowToNoRealRecordIndex(rowIndex);
+      } catch (error) {
+        console.warn(`Failed to collapse master detail row ${rowIndex} before setRecords:`, error);
+      }
+    });
+
+    const subTableRowIndices = Array.from(internalProps.subTableInstances?.keys() ?? []);
+    subTableRowIndices.forEach(bodyRowIndex => {
+      this.subTableManager.removeSubTable(bodyRowIndex);
+    });
+
+    internalProps.expandedRecordIndices?.splice(0);
+    internalProps.originalRowHeights?.clear();
+    internalProps.subTableCheckboxStates?.clear();
+    this.eventManager.setExpandedRows([]);
   }
 
   /**
@@ -255,7 +281,10 @@ export class MasterDetailPlugin implements VTable.plugins.IVTablePlugin {
     const detailConfig = this.configManager.getDetailConfigForRecord(record, bodyRowIndex);
     const height = detailConfig?.style?.height || 300;
 
-    const childrenData = Array.isArray(record.children) ? record.children : [];
+    const childrenKey = this.configManager.getChildrenKey();
+    const childrenData = Array.isArray((record as Record<string, unknown>)[childrenKey])
+      ? ((record as Record<string, unknown>)[childrenKey] as unknown[])
+      : [];
 
     // 处理初始高度：如果是auto，先用默认值300展开
     const isAutoHeight = height === 'auto';
@@ -263,9 +292,6 @@ export class MasterDetailPlugin implements VTable.plugins.IVTablePlugin {
     this.updateRowHeightForExpand(rowIndex, deltaHeight);
     this.table.scenegraph.updateContainerHeight(rowIndex, deltaHeight);
     internalProps._heightResizedRowMap.add(rowIndex);
-    if (rowIndex === 96) {
-      console.log('wokk');
-    }
     this.subTableManager.renderSubTable(bodyRowIndex, childrenData, (record, bodyRowIndex) =>
       this.configManager.getDetailConfigForRecord(record, bodyRowIndex)
     );
@@ -564,22 +590,16 @@ export class MasterDetailPlugin implements VTable.plugins.IVTablePlugin {
    * 设置记录的子数据并展开
    */
   setRecordChildren(children: unknown[], col: number, row: number): void {
-    // 获取原始记录数据
-    const recordIndex = this.table.getRecordIndexByCell(col, row);
-    if (recordIndex === undefined || recordIndex === null) {
-      console.warn('Invalid row, cannot get record index');
-      return;
-    }
-
-    const realRecordIndex = typeof recordIndex === 'number' ? recordIndex : recordIndex[0];
-    const record = this.table.dataSource.get(realRecordIndex);
+    // 获取当前单元格对应的源数据记录，避免排序后索引不一致 #4986
+    const record = this.table.getCellOriginRecord(col, row);
     if (!record) {
-      console.warn('Cannot find record for index:', realRecordIndex);
+      console.warn('Cannot find record for cell:', col, row);
       return;
     }
 
-    // 直接修改原始记录的 children 属性
-    (record as Record<string, unknown>).children = children;
+    // 直接修改原始记录的子数据属性
+    const childrenKey = this.configManager.getChildrenKey();
+    (record as Record<string, unknown>)[childrenKey] = children;
     this.expandRow(row, col);
     this.table.scenegraph.updateCellContent(col, row);
   }

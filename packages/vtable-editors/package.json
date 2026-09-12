@@ -1,6 +1,6 @@
 {
   "name": "@visactor/vtable-editors",
-  "version": "1.22.8",
+  "version": "1.26.8",
   "description": "",
   "sideEffects": false,
   "main": "cjs/index.js",
@@ -18,11 +18,17 @@
       "import": "./es/index.js"
     }
   },
+  "unpkg": "latest",
+  "unpkgFiles": [
+    "dist/vtable-editors.js",
+    "dist/vtable-editors.min.js"
+  ],
   "scripts": {
     "compile": "tsc --noEmit",
     "eslint": "eslint --debug --fix src/",
     "build": "npm run fix-memory-limit && bundle",
     "dev": "bundle --clean -f es -w",
+    "test": "jest --silent",
     "test-cov": "jest -w 16 --coverage",
     "test-live": "npm run test-watch __tests__/unit/",
     "test-watch": "DEBUG_MODE=1 jest --watch",

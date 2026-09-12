@@ -76,6 +76,44 @@ Corresponding property update interface (see tutorial: https://visactor.io/vtabl
 tableInstance.columns = newColumns;
 ```
 
+## changeHeaderPosition(Function)
+
+Programmatically move header position (drag header behavior), returns whether the move succeeded.
+
+```ts
+  changeHeaderPosition: (args: {
+    source: CellAddress;
+    target: CellAddress;
+    movingColumnOrRow?: 'column' | 'row';
+  }) => boolean
+```
+
+Usage:
+
+```ts
+tableInstance.changeHeaderPosition({
+  source: { col: 1, row: 0 },
+  target: { col: 3, row: 0 },
+  movingColumnOrRow: 'column'
+});
+```
+
+## mergeCells(Function)
+
+Merge cells by creating a custom merge range (ListTable only). After merging, the table will refresh and emit the `merge_cells` event.
+
+```ts
+  mergeCells: (startCol: number, startRow: number, endCol: number, endRow: number) => void
+```
+
+## unmergeCells(Function)
+
+Unmerge cells by removing the corresponding custom merge range (ListTable only). After unmerging, the table will refresh and emit the `unmerge_cells` event.
+
+```ts
+  unmergeCells: (startCol: number, startRow: number, endCol: number, endRow: number) => void
+```
+
 ## updatePagination(Function)
 
 Update pagination configuration information, automatically redraws after calling.
@@ -1454,6 +1492,8 @@ export type TooltipOptions = {
     padding?: number[];
     arrowMark?: boolean;
   };
+  /** Set tooltip appearance delay time */
+  appearDelay?: number;
   /** Set tooltip disappearance time */
   disappearDelay?: number;
 };
@@ -1708,8 +1748,43 @@ Change the value of the cell:
    * @param value Changed value
    * @param workOnEditableCell Whether to only change editable cells
    * @param triggerEvent Whether to trigger change_cell_value event when the value changes
+   * @param noTriggerChangeCellValuesEvent Whether to suppress the aggregated change_cell_values event
    */
-  changeCellValue: (col: number, row: number, value: string | number | null, workOnEditableCell = false, triggerEvent = true) => void;
+  changeCellValue: (
+    col: number,
+    row: number,
+    value: string | number | null,
+    workOnEditableCell = false,
+    triggerEvent = true,
+    noTriggerChangeCellValuesEvent?: boolean
+  ) => void;
+```
+
+## changeCellValuesByRanges(Function)
+
+Batch update data within multiple selected ranges.
+
+Currently it only supports setting all cells in the ranges to the same value.
+
+**ListTable specific**
+
+```
+  /**
+   * Batch update data within multiple selected ranges.
+   * Currently it only supports setting all cells in the ranges to the same value.
+   * @param ranges Selected ranges
+   * @param value The unified value to set
+   * @param workOnEditableCell Whether to only change editable cells
+   * @param triggerEvent Whether to trigger change_cell_value/change_cell_values events
+   * @param noTriggerChangeCellValuesEvent Whether to suppress the aggregated change_cell_values event
+   */
+  changeCellValuesByRanges: (
+    ranges: CellRange[],
+    value: string | number | null,
+    workOnEditableCell?: boolean,
+    triggerEvent?: boolean,
+    noTriggerChangeCellValuesEvent?: boolean
+  ) => void;
 ```
 
 ## changeCellValues(Function)
@@ -1724,8 +1799,111 @@ Batch change the values of cells:
    * @param values Data array for multiple cells
    * @param workOnEditableCell Whether to only change editable cells
    * @param triggerEvent Whether to trigger change_cell_value event when values change
+   * @param noTriggerChangeCellValuesEvent Whether to suppress the aggregated change_cell_values event
    */
-  changeCellValues(startCol: number, startRow: number, values: string[][], workOnEditableCell = false, triggerEvent=true) => Promise<boolean[][]>;
+  changeCellValues: (
+    startCol: number,
+    startRow: number,
+    values: string[][],
+    workOnEditableCell?: boolean,
+    triggerEvent?: boolean,
+    noTriggerChangeCellValuesEvent?: boolean
+  ) => Promise<boolean[][]>;
+```
+
+## changeCellValueByRecord(Function)
+
+Change cell value by `recordIndex` (source records index) and `field`.
+
+**ListTable specific**
+
+```
+  /**
+   * Change cell value by recordIndex (source records index) and field.
+   * recordIndex is the index in the original source records: number for normal tables; number[] for tree tables.
+   */
+  changeCellValueByRecord: (
+    recordIndex: number | number[],
+    field: FieldDef,
+    value: string | number | null,
+    options?: {
+      triggerEvent?: boolean;
+      noTriggerChangeCellValuesEvent?: boolean;
+      autoRefresh?: boolean;
+    }
+  ) => void;
+```
+
+## changeCellValuesByRecords(Function)
+
+Batch change cell values by `recordIndex` (source records index) and `field`.
+
+**ListTable specific**
+
+```
+  /**
+   * Batch change cell values by recordIndex (source records index) and field.
+   */
+  changeCellValuesByRecords: (
+    changeValues: Array<{
+      recordIndex: number | number[];
+      field: FieldDef;
+      value: string | number | null;
+    }>,
+    options?: {
+      triggerEvent?: boolean;
+      noTriggerChangeCellValuesEvent?: boolean;
+      autoRefresh?: boolean;
+    }
+  ) => void;
+```
+
+## changeCellValueBySource(Function)
+
+Alias of `changeCellValueByRecord` with positional parameters.
+
+**ListTable specific**
+
+```
+  changeCellValueBySource: (
+    recordIndex: number | number[],
+    field: FieldDef,
+    value: string | number | null,
+    triggerEvent?: boolean,
+    noTriggerChangeCellValuesEvent?: boolean
+  ) => void;
+```
+
+## changeCellValuesBySource(Function)
+
+Alias of `changeCellValuesByRecords` with positional parameters.
+
+**ListTable specific**
+
+```
+  changeCellValuesBySource: (
+    changeValues: Array<{
+      recordIndex: number | number[];
+      field: FieldDef;
+      value: string | number | null;
+    }>,
+    triggerEvent?: boolean,
+    noTriggerChangeCellValuesEvent?: boolean
+  ) => void;
+```
+
+## refreshAfterSourceChange(Function)
+
+Refresh the table after directly changing source records (optionally reapply filter/sort).
+
+**ListTable specific**
+
+```
+  refreshAfterSourceChange: (options?: {
+    reapplyFilter?: boolean;
+    reapplySort?: boolean;
+    clearRowHeightCache?: boolean;
+  }) => void;
 ```
 
 ## getEditor(Function)
@@ -1757,6 +1935,15 @@ End editing
   completeEditCell: () => void;
 ```
 
+## cancelEditCell(Function)
+
+Cancel editing without saving any changes
+
+```
+  /** Cancel editing */
+  cancelEditCell: () => void;
+```
+
 ## records
 
 Get all data of the current table
@@ -1782,6 +1969,10 @@ Add data, supports multiple data items
   addRecords(records: any[], recordIndex?: number|number[])
 ```
 
+**Notes:**
+
+- If `syncRecordOperationsToSourceRecords` is enabled, add operations in filter/sort state will also sync to the original `records` (source records).
+
 ## addRecord(Function)
 
 Add data, single data item
@@ -1798,6 +1989,10 @@ Add data, single data item
    */
   addRecord(record: any, recordIndex?: number|number[])
 ```
+
+**Notes:**
+
+- If `syncRecordOperationsToSourceRecords` is enabled, add operations in filter/sort state will also sync to the original `records` (source records).
 
 ## deleteRecords(Function)
 
@@ -1823,9 +2018,9 @@ Modify data, supports multiple data items
   /**
    * Modify data, supports multiple data items
    * @param records Modified data items
-   * @param recordIndexs Corresponding index of modified data (index displayed in body, i.e., which row of data in the body part to modify), in tree (grouping) structures, recordIndex may be an array, representing the index position of each level from the root node for that node.
+   * @param recordIndexs Corresponding index of modified data (index displayed in body, i.e., which row of data in the body part to modify), in tree (grouping) structures, recordIndex may be an array, representing the index position of each level from the root node for that node. When omitted, the records are updated by their array order.
    */
-  updateRecords(records: any[], recordIndexs: number[]|number[][])
+  updateRecords(records: any[], recordIndexs?: number[]|number[][])
 ```
 
 ## getBodyVisibleCellRange(Function)
@@ -1914,13 +2109,20 @@ Get the selection state of all checkbox data under a field, the order correspond
 getCheckboxState(field?: string | number): Array
 ```
 
+- field: Optional checkbox field. If omitted, returns checkbox states for all fields
+- return: Checkbox state array. Tree data keeps state by children path
+
 ## getCellCheckboxState(Function)
 
 Get the state of a checkbox in a specific cell
 
 ```
-getCellCheckboxState(col: number, row: number): Array
+getCellCheckboxState(col: number, row: number): boolean | 'indeterminate' | undefined
 ```
+
+- col: Column number
+- row: Row number
+- return: Checkbox state of the cell
 
 ## getRadioState(Function)
 
@@ -1949,6 +2151,38 @@ setCellCheckboxState(col: number, row: number, checked: boolean) => void
 - col: Column number
 - row: Row number
 - checked: Whether selected
+
+## setCellCheckboxStateByRecordIndex(Function)
+
+Set the checkbox state by source records index and field. For tree tables, pass a children path such as `[0, 1]` for the second child of the first root record. The state is updated even when the target node is collapsed and not currently visible.
+
+```
+setCellCheckboxStateByRecordIndex(recordIndex: number | number[], field: string | number, checked: boolean | 'indeterminate') => void
+```
+
+- recordIndex: Source data index; number for normal tables, number[] for tree tables
+- field: Field of the checkbox column
+- checked: Checkbox state, including `'indeterminate'`
+
+## clearCheckboxState(Function)
+
+Clear all checkbox checked states under the specified field. `clearAllCheckboxState(field)` is an alias of this method.
+
+```
+clearCheckboxState(field: string | number) => void
+```
+
+- field: Field of the checkbox column
+
+## clearAllCheckboxState(Function)
+
+Alias of `clearCheckboxState(field)`. Clear all checkbox checked states under the specified field.
+
+```
+clearAllCheckboxState(field: string | number) => void
+```
+
+- field: Field of the checkbox column
 
 ## setCellRadioState(Function)
 
@@ -2323,4 +2557,36 @@ Usage:
 ```ts
 // Collapse all column header tree nodes
 tableInstance.collapseAllForColumnTree();
+```
+
+## updateCellContent(Function)
+
+Update the content of a single cell. This interface only refreshes the content of the scenegraph node, not rendering. The render() interface will not actively update the content of the scenegraph node.
+
+```ts
+  /**
+   * Update the content of a single cell
+   */
+  updateCellContent: (col: number, row: number) => void;
+```
+## updateCellContentRange(Function)
+
+Update the content of a range of cells. This interface only refreshes the content of the scenegraph node, not rendering. The render() interface will not actively update the content of the scenegraph node.
+
+```ts
+  /**
+   * Update the content of a range of cells
+   */
+  updateCellContentRange: (startCol: number, startRow: number, endCol: number, endRow: number) => void;
+```
+
+## updateCellContentRanges(Function)
+
+Update the content of a range of cells. This interface only refreshes the content of the scenegraph node, not rendering. The render() interface will not actively update the content of the scenegraph node.
+
+```ts
+  /**
+   * Update the content of a range of cells
+   */
+  updateCellContentRanges: (ranges: CellRange[]) => void;
 ```

@@ -17,9 +17,9 @@ import type {
 import { AggregationType, HierarchyState } from '../ts-types';
 import { applyChainSafe, getOrApply, obj, isPromise, emptyFn } from '../tools/helper';
 import { EventTarget } from '../event/EventTarget';
-import { computeChildrenNodeLength, getValueByPath, isAllDigits } from '../tools/util';
+import { computeChildrenNodeLength, isAllDigits } from '../tools/util';
 import { calculateArrayDiff } from '../tools/diff-cell';
-import { arrayEqual, cloneDeep, isArray, isNumber, isObject, isValid } from '@visactor/vutils';
+import { arrayEqual, cloneDeep, isArray, isNumber, isValid } from '@visactor/vutils';
 import type { BaseTableAPI } from '../ts-types/base-table';
 import {
   RecordAggregator,
@@ -100,8 +100,12 @@ export function getField(
     const colIndex = col - table.leftRowSeriesNumberCount;
     return record[colIndex];
   }
-  if (isObject(record) && fieldGet in (record as any)) {
-    const fieldResult = (record as any)[fieldGet];
+  if (Array.isArray(fieldGet)) {
+    const fieldResult = getRecordFieldValue(record, fieldGet);
+    return getValue(fieldResult, promiseCallBack);
+  }
+  if (isRecordContainer(record) && fieldGet in record) {
+    const fieldResult = record[fieldGet];
 
     return getValue(fieldResult, promiseCallBack);
   }
@@ -109,13 +113,9 @@ export function getField(
     const fieldResult = fieldGet(record, col, row, table);
     return getValue(fieldResult, promiseCallBack);
   }
-  if (Array.isArray(fieldGet)) {
-    const fieldResult = getValueByPath(record, [...fieldGet]);
-    return getValue(fieldResult, promiseCallBack);
-  }
   const fieldArray = `${fieldGet}`.split('.');
   if (fieldArray.length <= 1) {
-    const fieldResult = (record as any)[fieldGet];
+    const fieldResult = record[fieldGet];
     return getValue(fieldResult, promiseCallBack);
   }
   const fieldResult = applyChainSafe(
@@ -124,6 +124,94 @@ export function getField(
     ...fieldArray
   );
   return getValue(fieldResult, promiseCallBack);
+}
+
+function isRecordContainer(value: any): boolean {
+  return value !== null && typeof value === 'object';
+}
+
+function getRecordFieldPath(field: FieldDef | number): string[] | undefined {
+  if (Array.isArray(field)) {
+    return field;
+  }
+  if (typeof field === 'string' && field.includes('.')) {
+    return field.split('.');
+  }
+  return undefined;
+}
+
+function hasRecordField(record: any, field: FieldDef | number): boolean {
+  if (!isRecordContainer(record)) {
+    return false;
+  }
+  const path = getRecordFieldPath(field);
+  if (!Array.isArray(field) && (field as any) in record) {
+    return true;
+  }
+  if (!path) {
+    return false;
+  }
+  let target = record;
+  for (const key of path) {
+    if (!isRecordContainer(target) || !(key in target)) {
+      return false;
+    }
+    target = target[key];
+  }
+  return true;
+}
+
+export function getRecordFieldValue(record: any, field: FieldDef | number): any {
+  if (record === null || record === undefined) {
+    return undefined;
+  }
+  const path = getRecordFieldPath(field);
+  if (!Array.isArray(field) && isRecordContainer(record) && (field as any) in record) {
+    return record[field as any];
+  }
+  if (!path) {
+    return record[field as any];
+  }
+  return path.reduce((current, key) => {
+    return current === null || current === undefined ? undefined : current[key];
+  }, record);
+}
+
+function setRecordProperty(record: any, key: string, value: any): void {
+  if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+    Object.defineProperty(record, key, {
+      configurable: true,
+      enumerable: true,
+      value,
+      writable: true
+    });
+    return;
+  }
+  record[key] = value;
+}
+
+export function setRecordFieldValue(record: any, field: FieldDef | number, value: FieldData): void {
+  if (record === null || record === undefined) {
+    return;
+  }
+  const path = getRecordFieldPath(field);
+  if (!path || (!Array.isArray(field) && isRecordContainer(record) && (field as any) in record)) {
+    setRecordProperty(record, field as any, value);
+    return;
+  }
+
+  if (path.length === 0) {
+    return;
+  }
+  let target = record;
+  for (let i = 0; i < path.length - 1; i++) {
+    const key = path[i];
+    if (!Object.prototype.hasOwnProperty.call(target, key) || target[key] === null || typeof target[key] !== 'object') {
+      setRecordProperty(target, key, {});
+    }
+    target = target[key];
+  }
+  setRecordProperty(target, path[path.length - 1], value);
 }
 
 function _getIndex(sortedIndexMap: null | (number | number[])[], index: number): number | number[] {
@@ -163,6 +251,7 @@ export class DataSource extends EventTarget implements DataSourceAPI {
    * 缓存按字段进行排序的结果
    */
   protected sortedIndexMap: Map<FieldDef, ISortedMapItem>;
+  private _forceVisibleRecords?: WeakSet<object>;
   /**
    * 记录最近一次排序规则 当展开树形结构的节点时需要用到
    */
@@ -731,7 +820,7 @@ export class DataSource extends EventTarget implements DataSourceAPI {
     col?: number,
     row?: number,
     table?: BaseTableAPI
-  ): FieldData {
+  ): FieldData | Promise<FieldData> {
     if (field === null) {
       return undefined;
     }
@@ -743,32 +832,85 @@ export class DataSource extends EventTarget implements DataSourceAPI {
       if (field === undefined || field === '') {
         field = col - table.leftRowSeriesNumberCount;
       }
-      if (typeof field === 'string' || typeof field === 'number') {
-        const beforeChangedValue = this.beforeChangedRecordsMap.get(dataIndex.toString())?.[field as any]; // this.getOriginalField(index, field, col, row, table);
+      if (typeof field === 'string' || typeof field === 'number' || Array.isArray(field)) {
+        const beforeChangedValue = getRecordFieldValue(this.beforeChangedRecordsMap.get(dataIndex.toString()), field);
         const record = this.getOriginalRecord(dataIndex);
         let formatValue = value;
         if (typeof beforeChangedValue === 'number' && isAllDigits(value)) {
           formatValue = parseFloat(value);
         }
         if (isPromise(record)) {
-          record
+          return record
             .then(record => {
-              record[field as string | number] = formatValue;
+              setRecordFieldValue(record, field, formatValue);
+              return formatValue;
             })
             .catch((err: Error) => {
               console.error('VTable Error:', err);
+              return undefined;
             });
+        }
+        if (record) {
+          setRecordFieldValue(record, field, formatValue);
         } else {
-          if (record) {
-            record[field] = formatValue;
-          } else {
-            this.records[dataIndex as number] = this.addRecordRule === 'Array' ? [] : {};
-            this.records[dataIndex as number][field] = formatValue;
-          }
+          this.records[dataIndex as number] = this.addRecordRule === 'Array' ? [] : {};
+          setRecordFieldValue(this.records[dataIndex as number], field, formatValue);
         }
       }
     }
     // return getField(record, field);
+  }
+
+  changeFieldValueByRecordIndex(
+    value: FieldData,
+    recordIndex: number | number[],
+    field: FieldDef,
+    table?: BaseTableAPI
+  ): FieldData {
+    if (field === null) {
+      return undefined;
+    }
+    if (recordIndex === undefined || recordIndex === null) {
+      return;
+    }
+
+    const rawKey = recordIndex.toString();
+    if (!this.beforeChangedRecordsMap.has(rawKey)) {
+      const rawRecords = Array.isArray((this.dataSourceObj as any)?.records)
+        ? (this.dataSourceObj as any).records
+        : null;
+      const originRecord = rawRecords
+        ? Array.isArray(recordIndex)
+          ? getValueFromDeepArray(rawRecords, recordIndex)
+          : rawRecords[recordIndex]
+        : undefined;
+      this.beforeChangedRecordsMap.set(
+        rawKey,
+        cloneDeep(originRecord, undefined, ['vtable_gantt_linkedFrom', 'vtable_gantt_linkedTo']) ?? {}
+      );
+    }
+
+    if (typeof field === 'string' || typeof field === 'number' || Array.isArray(field)) {
+      const beforeChangedValue = getRecordFieldValue(this.beforeChangedRecordsMap.get(rawKey), field);
+      const rawRecords = Array.isArray((this.dataSourceObj as any)?.records)
+        ? (this.dataSourceObj as any).records
+        : null;
+      const record = rawRecords
+        ? Array.isArray(recordIndex)
+          ? getValueFromDeepArray(rawRecords, recordIndex)
+          : rawRecords[recordIndex]
+        : undefined;
+      let formatValue = value;
+      if (typeof beforeChangedValue === 'number' && isAllDigits(value)) {
+        formatValue = parseFloat(value);
+      }
+      if (record) {
+        setRecordFieldValue(record, field, formatValue);
+      } else if (rawRecords && typeof recordIndex === 'number') {
+        rawRecords[recordIndex] = this.addRecordRule === 'Array' ? [] : {};
+        setRecordFieldValue(rawRecords[recordIndex], field, formatValue);
+      }
+    }
   }
 
   cacheBeforeChangedRecord(dataIndex: number | number[], table?: BaseTableAPI) {
@@ -813,36 +955,118 @@ export class DataSource extends EventTarget implements DataSourceAPI {
    * @param record 被添加的单条数据
    * @param index 代表的数据源中的index
    */
-  addRecord(record: any, index: number) {
-    if (Array.isArray(this.records)) {
-      this.records.splice(index, 0, record);
-      this.adjustBeforeChangedRecordsMap(index, 1);
-      this.currentIndexedData.push(this.currentIndexedData.length);
-      this._sourceLength += 1;
-      for (let i = 0; i < this.fieldAggregators.length; i++) {
-        this.fieldAggregators[i].push(record);
-      }
-      if (this.rowHierarchyType === 'tree') {
-        this.initTreeHierarchyState();
-      }
-      if (this.userPagination) {
-        //如果用户配置了分页
-        this.pagination.totalCount = this._sourceLength;
-        const { perPageCount, currentPage } = this.pagination;
-        const startIndex = perPageCount * (currentPage || 0);
-        const endIndex = startIndex + perPageCount;
-        if (index < endIndex) {
+  private _getRawRecordsArray(): any[] | null {
+    const rawRecords = (this.dataSourceObj as DataSourceParam)?.records;
+    return Array.isArray(rawRecords) ? rawRecords : null;
+  }
+  private _hasFilterInEffect(): boolean {
+    return (this.dataConfig?.filterRules?.length ?? 0) >= 1 || (this.lastFilterRules?.length ?? 0) >= 1;
+  }
+  private _normalizeInsertIndex(index: number, length: number): number {
+    if (index === undefined || index === null) {
+      return length;
+    }
+    if (index > length) {
+      return length;
+    }
+    if (index < 0) {
+      return 0;
+    }
+    return index;
+  }
+  private _mapViewInsertIndexToRawInsertIndex(rawRecords: any[], viewIndex: number): number {
+    if (this.records.length === 0) {
+      return rawRecords.length;
+    }
+
+    if (viewIndex <= 0) {
+      const firstVisibleRecord = this.records[0];
+      const rawIndex = rawRecords.indexOf(firstVisibleRecord);
+      return rawIndex >= 0 ? rawIndex : 0;
+    }
+
+    if (viewIndex >= this.records.length) {
+      const lastVisibleRecord = this.records[this.records.length - 1];
+      const rawIndex = rawRecords.indexOf(lastVisibleRecord);
+      return rawIndex >= 0 ? rawIndex + 1 : rawRecords.length;
+    }
+
+    const prevRecord = this.records[viewIndex - 1];
+    const rawIndex = rawRecords.indexOf(prevRecord);
+    return rawIndex >= 0 ? rawIndex + 1 : rawRecords.length;
+  }
+  private _resetIndexingFromViewRecords(): void {
+    this._sourceLength = this.records.length;
+    this.currentIndexedData = Array.from({ length: this._sourceLength }, (_, i) => i);
+    if (this.rowHierarchyType === 'tree') {
+      this.initTreeHierarchyState();
+    }
+    if (this.userPagination) {
+      this.pagination.totalCount = this._sourceLength;
+      this.updatePagerData();
+      return;
+    }
+    this.pagination.perPageCount = this._sourceLength;
+    this.pagination.totalCount = this._sourceLength;
+    this.updatePagerData();
+  }
+
+  addRecord(record: any, index: number, syncToOriginalRecords: boolean = false) {
+    if (!syncToOriginalRecords) {
+      if (Array.isArray(this.records)) {
+        this.records.splice(index, 0, record);
+        this.adjustBeforeChangedRecordsMap(index, 1);
+        this.currentIndexedData.push(this.currentIndexedData.length);
+        this._sourceLength += 1;
+        for (let i = 0; i < this.fieldAggregators.length; i++) {
+          this.fieldAggregators[i].push(record);
+        }
+        if (this.rowHierarchyType === 'tree') {
+          this.initTreeHierarchyState();
+        }
+        if (this.userPagination) {
+          this.pagination.totalCount = this._sourceLength;
+          const { perPageCount, currentPage } = this.pagination;
+          const startIndex = perPageCount * (currentPage || 0);
+          const endIndex = startIndex + perPageCount;
+          if (index < endIndex) {
+            this.updatePagerData();
+          }
+        } else {
+          this.pagination.perPageCount = this._sourceLength;
+          this.pagination.totalCount = this._sourceLength;
           this.updatePagerData();
         }
-      } else {
-        this.pagination.perPageCount = this._sourceLength;
-        this.pagination.totalCount = this._sourceLength;
-        this.updatePagerData();
-      }
 
-      if ((this.dataSourceObj as DataSourceParam)?.added) {
-        (this.dataSourceObj as DataSourceParam).added(index, 1);
+        if ((this.dataSourceObj as DataSourceParam)?.added) {
+          (this.dataSourceObj as DataSourceParam).added(index, 1);
+        }
       }
+      return;
+    }
+
+    const rawRecords = this._getRawRecordsArray();
+    if (!rawRecords) {
+      return;
+    }
+
+    const viewInsertIndex = this._normalizeInsertIndex(index, this.records.length);
+    const rawInsertIndex = this._hasFilterInEffect()
+      ? this._mapViewInsertIndexToRawInsertIndex(rawRecords, viewInsertIndex)
+      : this._normalizeInsertIndex(viewInsertIndex, rawRecords.length);
+
+    rawRecords.splice(rawInsertIndex, 0, record);
+    if (syncToOriginalRecords && this._hasFilterInEffect()) {
+      // 配合 syncRecordOperationsToSourceRecords：筛选中新增“草稿行”即使不满足筛选条件也要暂时可见，
+      // 直到下一次主动 updateFilterRules 触发重新筛选。
+      this.markForceVisibleRecord(record);
+    }
+    this.beforeChangedRecordsMap.clear();
+    this.sortedIndexMap.clear();
+    this.updateFilterRules(this.dataConfig?.filterRules);
+
+    if ((this.dataSourceObj as DataSourceParam)?.added) {
+      (this.dataSourceObj as DataSourceParam).added(rawInsertIndex, 1);
     }
   }
   /**
@@ -850,41 +1074,68 @@ export class DataSource extends EventTarget implements DataSourceAPI {
    * @param recordArr
    * @param index 代表的数据源中的index
    */
-  addRecords(recordArr: any, index: number) {
-    if (Array.isArray(this.records)) {
-      if (Array.isArray(recordArr)) {
-        this.records.splice(index, 0, ...recordArr);
-        this.adjustBeforeChangedRecordsMap(index, recordArr.length);
-        for (let i = 0; i < recordArr.length; i++) {
-          this.currentIndexedData.push(this.currentIndexedData.length);
-        }
-        this._sourceLength += recordArr.length;
+  addRecords(recordArr: any, index: number, syncToOriginalRecords: boolean = false) {
+    if (!syncToOriginalRecords) {
+      if (Array.isArray(this.records)) {
+        if (Array.isArray(recordArr)) {
+          this.records.splice(index, 0, ...recordArr);
+          this.adjustBeforeChangedRecordsMap(index, recordArr.length);
+          for (let i = 0; i < recordArr.length; i++) {
+            this.currentIndexedData.push(this.currentIndexedData.length);
+          }
+          this._sourceLength += recordArr.length;
 
-        for (let i = 0; i < this.fieldAggregators.length; i++) {
-          for (let j = 0; j < recordArr.length; j++) {
-            this.fieldAggregators[i].push(recordArr[j]);
+          for (let i = 0; i < this.fieldAggregators.length; i++) {
+            for (let j = 0; j < recordArr.length; j++) {
+              this.fieldAggregators[i].push(recordArr[j]);
+            }
           }
         }
-      }
 
-      if (this.userPagination) {
-        //如果用户配置了分页
-        this.pagination.totalCount = this._sourceLength;
-        const { perPageCount, currentPage } = this.pagination;
-        const startIndex = perPageCount * (currentPage || 0);
-        const endIndex = startIndex + perPageCount;
-        if (index < endIndex) {
+        if (this.userPagination) {
+          this.pagination.totalCount = this._sourceLength;
+          const { perPageCount, currentPage } = this.pagination;
+          const startIndex = perPageCount * (currentPage || 0);
+          const endIndex = startIndex + perPageCount;
+          if (index < endIndex) {
+            this.updatePagerData();
+          }
+        } else {
+          this.pagination.perPageCount = this._sourceLength;
+          this.pagination.totalCount = this._sourceLength;
           this.updatePagerData();
         }
-      } else {
-        this.pagination.perPageCount = this._sourceLength;
-        this.pagination.totalCount = this._sourceLength;
-        this.updatePagerData();
-      }
 
-      if ((this.dataSourceObj as DataSourceParam)?.added) {
-        (this.dataSourceObj as DataSourceParam).added(index, recordArr.length);
+        if ((this.dataSourceObj as DataSourceParam)?.added) {
+          (this.dataSourceObj as DataSourceParam).added(index, recordArr.length);
+        }
       }
+      return;
+    }
+
+    const rawRecords = this._getRawRecordsArray();
+    if (!rawRecords || !Array.isArray(recordArr) || recordArr.length === 0) {
+      return;
+    }
+
+    const viewInsertIndex = this._normalizeInsertIndex(index, this.records.length);
+    const rawInsertIndex = this._hasFilterInEffect()
+      ? this._mapViewInsertIndexToRawInsertIndex(rawRecords, viewInsertIndex)
+      : this._normalizeInsertIndex(viewInsertIndex, rawRecords.length);
+
+    rawRecords.splice(rawInsertIndex, 0, ...recordArr);
+    if (syncToOriginalRecords && this._hasFilterInEffect()) {
+      for (let i = 0; i < recordArr.length; i++) {
+        // 同上：筛选态下批量新增的草稿行需要临时保留在视图中，便于用户继续编辑。
+        this.markForceVisibleRecord(recordArr[i]);
+      }
+    }
+    this.beforeChangedRecordsMap.clear();
+    this.sortedIndexMap.clear();
+    this.updateFilterRules(this.dataConfig?.filterRules);
+
+    if ((this.dataSourceObj as DataSourceParam)?.added) {
+      (this.dataSourceObj as DataSourceParam).added(rawInsertIndex, recordArr.length);
     }
   }
 
@@ -930,50 +1181,93 @@ export class DataSource extends EventTarget implements DataSourceAPI {
   }
 
   adjustBeforeChangedRecordsMap(insertIndex: number, insertCount: number, type: 'add' | 'delete' = 'add') {
-    const length = this.beforeChangedRecordsMap.size;
-    for (let key = length - 1; key >= insertIndex; key--) {
+    const delta = type === 'add' ? insertCount : -insertCount;
+
+    const numericKeys: number[] = [];
+    this.beforeChangedRecordsMap.forEach((_, key) => {
+      const numKey = Number(key);
+      if (Number.isInteger(numKey) && numKey.toString() === key && numKey >= insertIndex) {
+        numericKeys.push(numKey);
+      }
+    });
+
+    numericKeys.sort((a, b) => (type === 'add' ? b - a : a - b));
+
+    for (let i = 0; i < numericKeys.length; i++) {
+      const key = numericKeys[i];
       const record = this.beforeChangedRecordsMap.get(key.toString());
       this.beforeChangedRecordsMap.delete(key.toString());
-      this.beforeChangedRecordsMap.set((key + (type === 'add' ? insertCount : -insertCount)).toString(), record);
+      this.beforeChangedRecordsMap.set((key + delta).toString(), record);
     }
   }
   /**
    * 删除多条数据recordIndexs
    */
-  deleteRecords(recordIndexs: number[]) {
-    if (Array.isArray(this.records)) {
-      const realDeletedRecordIndexs = [];
-      const recordIndexsMaxToMin = recordIndexs.sort((a, b) => b - a);
-      for (let index = 0; index < recordIndexsMaxToMin.length; index++) {
-        const recordIndex = recordIndexsMaxToMin[index];
-        if (recordIndex >= this._sourceLength || recordIndex < 0) {
-          continue;
+  deleteRecords(recordIndexs: number[], syncToOriginalRecords: boolean = false) {
+    if (!syncToOriginalRecords) {
+      if (Array.isArray(this.records)) {
+        const realDeletedRecordIndexs = [];
+        const recordIndexsMaxToMin = recordIndexs.sort((a, b) => b - a);
+        for (let index = 0; index < recordIndexsMaxToMin.length; index++) {
+          const recordIndex = recordIndexsMaxToMin[index];
+          if (recordIndex >= this._sourceLength || recordIndex < 0) {
+            continue;
+          }
+          this.adjustBeforeChangedRecordsMap(recordIndex, 1, 'delete');
+          realDeletedRecordIndexs.push(recordIndex);
+          const deletedRecord = this.records[recordIndex];
+          for (let i = 0; i < this.fieldAggregators.length; i++) {
+            this.fieldAggregators[i].deleteRecord(deletedRecord);
+          }
+          this.records.splice(recordIndex, 1);
+          this.currentIndexedData.pop();
+          this._sourceLength -= 1;
         }
-        // this.beforeChangedRecordsMap.delete(recordIndex.toString());
-        this.adjustBeforeChangedRecordsMap(recordIndex, 1, 'delete');
-        realDeletedRecordIndexs.push(recordIndex);
-        const deletedRecord = this.records[recordIndex];
-        for (let i = 0; i < this.fieldAggregators.length; i++) {
-          this.fieldAggregators[i].deleteRecord(deletedRecord);
+        if (this.userPagination) {
+          this.updatePagerData();
+        } else {
+          this.pagination.perPageCount = this._sourceLength;
+          this.pagination.totalCount = this._sourceLength;
+          this.updatePagerData();
         }
-        this.records.splice(recordIndex, 1);
-        this.currentIndexedData.pop();
-        this._sourceLength -= 1;
+        if ((this.dataSourceObj as DataSourceParam)?.deleted) {
+          (this.dataSourceObj as DataSourceParam).deleted(realDeletedRecordIndexs);
+        }
+        return realDeletedRecordIndexs;
       }
-      if (this.userPagination) {
-        // 如果用户配置了分页
-        this.updatePagerData();
-      } else {
-        this.pagination.perPageCount = this._sourceLength;
-        this.pagination.totalCount = this._sourceLength;
-        this.updatePagerData();
-      }
-      if ((this.dataSourceObj as DataSourceParam)?.deleted) {
-        (this.dataSourceObj as DataSourceParam).deleted(realDeletedRecordIndexs);
-      }
-      return realDeletedRecordIndexs;
+      return [];
     }
-    return [];
+
+    const rawRecords = this._getRawRecordsArray();
+    if (!rawRecords || !Array.isArray(this.records)) {
+      return [];
+    }
+
+    const realDeletedRecordIndexs: number[] = [];
+    const recordIndexsMaxToMin = recordIndexs.slice().sort((a, b) => b - a);
+    const rawDeletedIndexs: number[] = [];
+    for (let index = 0; index < recordIndexsMaxToMin.length; index++) {
+      const viewIndex = recordIndexsMaxToMin[index];
+      if (viewIndex >= this.records.length || viewIndex < 0) {
+        continue;
+      }
+      const deletedRecord = this.records[viewIndex];
+      const rawIndex = rawRecords.indexOf(deletedRecord);
+      if (rawIndex >= 0) {
+        rawRecords.splice(rawIndex, 1);
+        rawDeletedIndexs.push(rawIndex);
+      }
+      realDeletedRecordIndexs.push(viewIndex);
+    }
+
+    this.beforeChangedRecordsMap.clear();
+    this.sortedIndexMap.clear();
+    this.updateFilterRules(this.dataConfig?.filterRules);
+
+    if ((this.dataSourceObj as DataSourceParam)?.deleted) {
+      (this.dataSourceObj as DataSourceParam).deleted(rawDeletedIndexs);
+    }
+    return realDeletedRecordIndexs;
   }
   /**
    * 删除多条数据recordIndexs
@@ -1002,41 +1296,71 @@ export class DataSource extends EventTarget implements DataSourceAPI {
   /**
    * 修改多条数据recordIndexs
    */
-  updateRecords(records: any[], recordIndexs: (number | number[])[]) {
-    const realDeletedRecordIndexs = [];
+  updateRecords(records: any[], recordIndexs: (number | number[])[], syncToOriginalRecords: boolean = false) {
+    if (!syncToOriginalRecords) {
+      const realDeletedRecordIndexs = [];
+      for (let index = 0; index < recordIndexs.length; index++) {
+        const recordIndex = recordIndexs[index];
+        if (Array.isArray(recordIndex)) {
+          this.beforeChangedRecordsMap.delete(recordIndex.toString());
+          realDeletedRecordIndexs.push(recordIndex);
+          recordIndex.slice(0, -1).reduce((acc, key) => {
+            if (acc[key] === undefined) {
+              acc[key] = {};
+            }
+            return acc[key].children;
+          }, this.records)[recordIndex[recordIndex.length - 1]] = records[index];
+        } else {
+          if (recordIndex >= this._sourceLength || recordIndex < 0) {
+            continue;
+          }
+          this.beforeChangedRecordsMap.delete(recordIndex.toString());
+          realDeletedRecordIndexs.push(recordIndex);
+          for (let i = 0; i < this.fieldAggregators.length; i++) {
+            this.fieldAggregators[i].updateRecord(this.records[recordIndex], records[index]);
+          }
+          this.records[recordIndex] = records[index];
+        }
+      }
+      if (this.userPagination) {
+        this.updatePagerData();
+      }
+      return realDeletedRecordIndexs;
+    }
+
+    const rawRecords = this._getRawRecordsArray();
+    if (!rawRecords || !Array.isArray(this.records)) {
+      return [];
+    }
+
+    const realUpdatedIndexs: (number | number[])[] = [];
     for (let index = 0; index < recordIndexs.length; index++) {
       const recordIndex = recordIndexs[index];
       if (Array.isArray(recordIndex)) {
         this.beforeChangedRecordsMap.delete(recordIndex.toString());
-        realDeletedRecordIndexs.push(recordIndex);
-        // for (let i = 0; i < this.fieldAggregators.length; i++) {
-        //   this.fieldAggregators[i].updateRecord(this.records[recordIndex], records[index]);
-        // }
-
-        // this.records[recordIndex[0]][recordIndex[1]][recordIndex[2]] = records[index];
+        realUpdatedIndexs.push(recordIndex);
         recordIndex.slice(0, -1).reduce((acc, key) => {
           if (acc[key] === undefined) {
             acc[key] = {};
           }
           return acc[key].children;
-        }, this.records)[recordIndex[recordIndex.length - 1]] = records[index];
+        }, rawRecords)[recordIndex[recordIndex.length - 1]] = records[index];
       } else {
-        if (recordIndex >= this._sourceLength || recordIndex < 0) {
+        if (recordIndex >= this.records.length || recordIndex < 0) {
           continue;
         }
-        this.beforeChangedRecordsMap.delete(recordIndex.toString());
-        realDeletedRecordIndexs.push(recordIndex);
-        for (let i = 0; i < this.fieldAggregators.length; i++) {
-          this.fieldAggregators[i].updateRecord(this.records[recordIndex], records[index]);
+        const oldRecord = this.records[recordIndex];
+        const rawIndex = rawRecords.indexOf(oldRecord);
+        if (rawIndex >= 0) {
+          rawRecords[rawIndex] = records[index];
         }
-        this.records[recordIndex] = records[index];
+        realUpdatedIndexs.push(recordIndex);
       }
     }
-    if (this.userPagination) {
-      // 如果用户配置了分页
-      this.updatePagerData();
-    }
-    return realDeletedRecordIndexs;
+    this.beforeChangedRecordsMap.clear();
+    this.sortedIndexMap.clear();
+    this.updateFilterRules(this.dataConfig?.filterRules);
+    return realUpdatedIndexs;
   }
 
   /**
@@ -1165,7 +1489,13 @@ export class DataSource extends EventTarget implements DataSourceAPI {
 
     // If there were no caches, initialize them
     if (!filedMapArray.length) {
-      filedMapArray = states.map(() => ({ asc: [], desc: [], normal: [] }));
+      filedMapArray = states.map(
+        (): ISortedMapItem => ({
+          asc: [] as (number | number[])[],
+          desc: [] as (number | number[])[],
+          normal: [] as (number | number[])[]
+        })
+      );
       for (let index = 0; index < states.length; index++) {
         this.sortedIndexMap.set(states[index].field, filedMapArray[index]);
       }
@@ -1184,14 +1514,31 @@ export class DataSource extends EventTarget implements DataSourceAPI {
   setSortedIndexMap(field: FieldDef, filedMap: ISortedMapItem) {
     this.sortedIndexMap.set(field, filedMap);
   }
+  // 仅用于 syncRecordOperationsToSourceRecords 场景：筛选态新增的记录可能暂时不满足筛选条件，
+  // 但仍希望在当前筛选视图中可见，直到下一次主动 updateFilterRules 生效。
+  markForceVisibleRecord(record: any) {
+    if (!record || (typeof record !== 'object' && typeof record !== 'function')) {
+      return;
+    }
+    this._forceVisibleRecords ||= new WeakSet<object>();
+    this._forceVisibleRecords.add(record as object);
+  }
+  // 配合 markForceVisibleRecord：当用户主动调用 updateFilterRules 时清空，保证筛选结果可预期。
+  clearForceVisibleRecords() {
+    this._forceVisibleRecords = undefined;
+  }
 
   private clearFilteredChildren(record: any) {
     record.filteredChildren = undefined;
+    delete record.filteredChildren;
     for (let i = 0; i < (record.children?.length ?? 0); i++) {
       this.clearFilteredChildren(record.children[i]);
     }
   }
   private filterRecord(record: any) {
+    if (this._forceVisibleRecords?.has(record as any)) {
+      return true;
+    }
     let isReserved = true;
     for (let i = 0; i < this.dataConfig.filterRules?.length; i++) {
       const filterRule = this.dataConfig?.filterRules[i];
@@ -1392,7 +1739,7 @@ export class DataSource extends EventTarget implements DataSourceAPI {
       return true;
     }
     const record = this.getOriginalRecord(index);
-    return Boolean(record && (field as any) in (record as any));
+    return hasRecordField(record, field);
   }
 
   protected fieldPromiseCallBack(
@@ -1421,6 +1768,10 @@ export class DataSource extends EventTarget implements DataSourceAPI {
   canChangeOrder(sourceIndex: number, targetIndex: number): boolean {
     if ((this, this.dataSourceObj?.canChangeOrder)) {
       return this.dataSourceObj.canChangeOrder(sourceIndex, targetIndex);
+    }
+
+    if (this.lastSortStates?.some(state => state.order === 'asc' || state.order === 'desc')) {
+      return false;
     }
 
     if (this.hasHierarchyStateExpand) {

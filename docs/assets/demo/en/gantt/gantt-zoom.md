@@ -19,6 +19,7 @@ The Gantt chart smart zoom feature provides multi-level timeline display schemes
 - API get current zoom state: Use methods provided by `getCurrentZoomState`
 - API set current zoom state: Use methods provided by `setZoomPosition`
 - API zooming: Use zoom methods provided by `zoomScaleManager`
+- `markLine.style.lineWidth`: Can be configured as a function to calculate the mark line width from the current zoomed timeline column width
 
 ## Demo
 
@@ -729,6 +730,27 @@ const option = {
       lineColor: '#f1f3f4'
     }
   },
+  markLine: [
+    {
+      date: '2024-07-17',
+      content: 'Dynamic width',
+      style: {
+        lineWidth: ({ timelineColWidth }) => Math.max(1, Math.round(timelineColWidth / 20)),
+        lineColor: 'blue',
+        lineDash: [8, 4]
+      }
+    },
+    {
+      date: '2024-08-17',
+      content: 'Fixed width',
+      position: 'middle',
+      style: {
+        lineWidth: 2,
+        lineColor: 'red',
+        lineDash: [8, 4]
+      }
+    }
+  ],
   headerRowHeight: 50,
   rowHeight: 40,
   overscrollBehavior: 'none'
@@ -911,10 +933,27 @@ function createZoomControls(ganttInstance) {
 
       radio.onchange = () => {
         if (radio.checked) {
-          // Switch to the middle state of the corresponding level
+          // 🎯 Zoom with view center as anchor point
+          // 1. Get the time point corresponding to the current view center
+          const scrollLeft = ganttInstance.stateManager.scrollLeft;
+          const viewportWidth = ganttInstance.tableNoFrameWidth;
+          const centerScrollPos = scrollLeft + viewportWidth / 2;
+          
+          const currentMsPerPixel = ganttInstance.getCurrentMillisecondsPerPixel();
+          const centerTime = ganttInstance.parsedOptions._minDateTime + centerScrollPos * currentMsPerPixel;
+          
+          // 2. Switch to corresponding level
           ganttInstance.zoomScaleManager?.setZoomPosition({
             levelNum: index
           });
+          
+          // 3. Adjust scroll position to keep center time point at view center
+          const newMsPerPixel = ganttInstance.getCurrentMillisecondsPerPixel();
+          const newCenterScrollPos = (centerTime - ganttInstance.parsedOptions._minDateTime) / newMsPerPixel;
+          const newScrollLeft = newCenterScrollPos - viewportWidth / 2;
+          
+          ganttInstance.stateManager.setScrollLeft(Math.max(0, newScrollLeft));
+          
           updateStatusDisplay();
         }
       };

@@ -1,3 +1,397 @@
+# v1.26.8
+
+2026-09-11
+
+**🆕 New Features**
+
+- **@visactor/vtable**: add themes.setDefaultTheme for application-wide default styling
+
+**🐛 Bug Fixes**
+
+- **@visactor/vtable**: prevent empty image, audio, and video cells from opening media previews (GitHub #5290)
+- **@visactor/vtable**: update nested fields by path
+- **@visactor/vtable**: prefer event clipboard data for copy and cut, fall back to it for paste when the async Clipboard API is unavailable, preserve cut source cells until paste succeeds, and normalize pasted HTML cell content (GitHub #5274)
+- **@visactor/vtable**: preserve pivot table column widths after updateOption (#5298)
+- **@visactor/vtable-sheet**: keep test-only plugin sources out of the package compile
+
+**Full Changelog**: https://github.com/VisActor/VTable/compare/v1.26.7...v1.26.8
+
+[more detail about v1.26.8](https://github.com/VisActor/VTable/releases/tag/v1.26.8)
+
+# v1.26.7
+
+2026-08-20
+
+**🆕 New Features**
+
+- **@visactor/vtable**: support tooltip appear delay
+- **@visactor/vtable**: add audio cell type support [#5271](https://github.com/VisActor/VTable/issues/5271)
+
+**🐛 Bug Fixes**
+
+- **@visactor/vtable**: prevent blank scrolling for large merged auto-height cells by keeping enough virtual rows [#3752](https://github.com/VisActor/VTable/issues/3752)
+- **@visactor/vtable**: preserve tree checkbox state after row drag reorder [#3975](https://github.com/VisActor/VTable/issues/3975)
+- **@visactor/vtable**: add context menu click event typing [#4655](https://github.com/VisActor/VTable/issues/4655)
+- **@visactor/vtable**: avoid loading all lazy dataSource records during customRender auto size computation [#4964](https://github.com/VisActor/VTable/issues/4964)
+- **@visactor/vtable**: render vue components in top frozen rows
+- **@visactor/vtable**: align frame border with short frozen rows [#5277](https://github.com/VisActor/VTable/issues/5277)
+- **@visactor/vtable**: keep headers after setRecords at scroll edge [#5278](https://github.com/VisActor/VTable/issues/5278)
+
+**Full Changelog**: https://github.com/VisActor/VTable/compare/v1.26.6...v1.26.7
+
+[more detail about v1.26.7](https://github.com/VisActor/VTable/releases/tag/v1.26.7)
+
+# v1.26.6
+
+2026-08-03
+
+**🐛 Bug Fixes**
+
+- **@visactor/vtable**: refresh rows when updateRecords is called without record indexes
+- **@visactor/vtable**: refresh functional icons after theme updates
+- **@visactor/vtable**: hide row series number in aggregation rows
+- **@visactor/vtable**: delete reverse-selected rows from context menu
+- **@visactor/vtable**: allow plugins to initialize before first render
+- **@visactor/vtable**: support updating checkbox state by record index
+
+**Full Changelog**: https://github.com/VisActor/VTable/compare/v1.26.5...v1.26.6
+
+[more detail about v1.26.6](https://github.com/VisActor/VTable/releases/tag/v1.26.6)
+
+# v1.26.5
+
+2026-07-15
+
+**🐛 Bug Fixes**
+
+- **@visactor/vtable**: handle null table container
+
+**🔨 Chores**
+
+- **@visactor/vtable**: Render group title for single-column list tables.
+
+**Full Changelog**: https://github.com/VisActor/VTable/compare/v1.26.4...v1.26.5
+
+[more detail about v1.26.5](https://github.com/VisActor/VTable/releases/tag/v1.26.5)
+
+# v1.26.4
+
+2026-07-06
+
+**🆕 New Features**
+
+- **@visactor/vtable**: Support rendering video cells from a first-frame canvas snapshot to release video resources after loading.
+
+**Full Changelog**: https://github.com/VisActor/VTable/compare/v1.26.3...v1.26.4
+
+[more detail about v1.26.4](https://github.com/VisActor/VTable/releases/tag/v1.26.4)
+
+# v1.26.3
+
+2026-06-25
+
+**🐛 Bug Fixes**
+
+- **@visactor/vtable**: skip click cell after resize interaction ends
+- **@visactor/vtable**: handle scroll frozen columns width
+- **@visactor/vtable**: keep pivot row tree scroll position on toggle
+- **@visactor/vtable**: preserve custom layout falsy values
+- **@visactor/vtable**: handle right frozen column count update
+- **@visactor/vtable**: keep fractional row scroll target
+- **@visactor/vtable**: sync gantt task bars after sorted updates
+- **@visactor/vtable**: preserve quad style values
+
+**Full Changelog**: https://github.com/VisActor/VTable/compare/v1.26.2...v1.26.3
+
+[more detail about v1.26.3](https://github.com/VisActor/VTable/releases/tag/v1.26.3)
+
+# v1.26.2
+
+2026-06-16
+
+**🐛 Bug Fixes**
+
+- **@visactor/vtable**: preserve sticky group position after expand or collapse
+- **@visactor/vtable**: preserve hidden column order after filter updates
+- **@visactor/vtable**: resolve the regression introduced by the #5137 fix that broke nested header dragging and exposed internal state
+- **@visactor/vtable**: fix an issue where keyboard multi-selection with `Shift` plus arrow keys stopped expanding after the second cell [#5146](https://github.com/VisActor/VTable/issues/5146)
+- **@visactor/vtable**: avoid selection gaps with frozen rows
+- **@visactor/vtable**: fix unexpected scroll position changes when collapsing or expanding hierarchy nodes at the bottom of a pivot table
+
+[more detail about v1.26.2](https://github.com/VisActor/VTable/releases/tag/v1.26.2)
+
+# v1.26.1
+
+2026-05-11
+
+
+**🆕 New feature**
+
+- **@visactor/vtable-sheet**: add sheet formula type
+
+**🐛 Bug fix**
+
+- **@visactor/vtable**: fix fill handle logic about getting cell value [#5096](https://github.com/VisActor/VTable/issues/5096)
+- **@visactor/vtable**: fix aggregation precisionAdd and precisionSub precision issue
+- **@visactor/vtable**: fix dblclickHandler not handling right click
+- **@visactor/vtable**: fix edit cell invalidateNotExit issue [#5114](https://github.com/VisActor/VTable/issues/5114)
+- **@visactor/vtable**: fix pivot sort state display error when rows and columns have the same dimension [#5055](https://github.com/VisActor/VTable/issues/5055)
+- **@visactor/vtable-sheet**: fix blank selection issue when moving selected cell with ArrowRight [#5113](https://github.com/VisActor/VTable/issues/5113)
+- **@visactor/vtable-plugin**: fix incorrect search results when searching text in tree table [#5071](https://github.com/VisActor/VTable/issues/5071)
+- **@visactor/vue-vtable**: fix package build export files
+
+
+
+[more detail about v1.26.1](https://github.com/VisActor/VTable/releases/tag/v1.26.1)
+
+# v1.26.0
+
+2026-04-03
+
+
+**🆕 New feature**
+
+- **@visactor/vtable**: compatible react version 19
+
+**🐛 Bug fix**
+
+- **@visactor/vtable**: radio cell type with rowseriesnumber error
+- **@visactor/vtable**: react19 reconciler
+- **@visactor/vtable**: degrade radio/checkbox cells to text in aggregation rows
+- **@visactor/vtable**: reset all interaction states on data update to avoid stale resize indicators
+
+**🔨 Refactor**
+
+- **@visactor/vtable**: when set barToSide and visible focus should not hide scrollbar
+
+
+
+[more detail about v1.26.0](https://github.com/VisActor/VTable/releases/tag/v1.26.0)
+
+# v1.25.0
+
+2026-03-25
+
+
+**🆕 New feature**
+
+- **@visactor/vtable**: gantt add locateIcon for taskbar
+- **@visactor/vtable**: add option scrollFrozenCols support frozen columns can be scrolled
+
+
+
+[more detail about v1.25.0](https://github.com/VisActor/VTable/releases/tag/v1.25.0)
+
+# v1.24.0
+
+2026-03-18
+
+
+**🆕 New feature**
+
+- **@visactor/vtable-gantt**: gantt weekend column width support setting
+- **@visactor/vtable-sheet**: add undo/redo to sheet
+
+**🐛 Bug fix**
+
+- **@visactor/vtable**: groupBy with frozenColCount and enableTreeStickCell usage problem
+- **@visactor/vtable**: when just has only one column groupTitle not show
+- **@visactor/vtable**: checkbox cell render error when set groupBy with rowSeriesNumber
+
+
+
+[more detail about v1.24.0](https://github.com/VisActor/VTable/releases/tag/v1.24.0)
+
+# v1.23.3
+
+2026-03-05
+
+
+**🆕 New feature**
+
+- **@visactor/vtable**: pivotchart handle with markline value to axis range
+-  **@visactor/vtable-gantt**:  develop gantt baseline feature
+
+**🐛 Bug fix**
+
+- **@visactor/vtable**: editor element occor error [#5003](https://github.com/VisActor/VTable/issues/5003)
+- **core**: prevent memory leaks in table cleanup
+
+
+
+[more detail about v1.23.3](https://github.com/VisActor/VTable/releases/tag/v1.23.3)
+
+# v1.23.2
+
+2026-02-11
+
+
+**🆕 New feature**
+
+- **@visactor/vtable**: pivot table headerType support cellType funcitonal [#4993](https://github.com/VisActor/VTable/issues/4993)
+- **@visactor/vtable**: add image_damage_pic and video_damage_pic type icons register & fix video damage icon ratio
+
+**🐛 Bug fix**
+
+- **@visactor/vtable-gantt**: fix datazoom component event update
+- **@visactor/vtable**: cell formula cache error after delete row record
+- **@visactor/vtable-plugins**: masterSubTable plugin setRecordChildren fetches wrong record after sorting
+- **@visactor/vtable**: video load fail damage icon
+- **@visactor/vtable**: image url not pass should call failCallback
+
+
+
+[more detail about v1.23.2](https://github.com/VisActor/VTable/releases/tag/v1.23.2)
+
+# v1.23.1
+
+2026-02-05
+
+
+**🆕 New feature**
+
+- **@visactor/vtable**: add componentLayoutOrder api [#4965](https://github.com/VisActor/VTable/issues/4965)
+- **@visactor/vtable**: optimize search latency
+- **@visactor/vtable**: add batch update cell value api and optimize filter state data sync
+- **@visactor/vtable**: add syncRecordOperationsToSourceRecords option to support sync operations to source data
+- **@visactor/vtable-sheet**: add updateOption api and optimize formula calculation
+- **@visactor/vtable-sheet**: add editable option to support edit cell
+
+**🐛 Bug fix**
+
+- **@visactor/vtable**: fix prepareEdit occor error [#4871](https://github.com/VisActor/VTable/issues/4871)
+- **@visactor/vtable**: updateOption run resize logic [#4965](https://github.com/VisActor/VTable/issues/4965)
+- **@visactor/vtable**: fix add record position error in filter state
+- **@visactor/vtable**: handle escape option correctly for CSV export
+- **@visactor/vtable**: set white background for media overlay image
+
+**🔨 Refactor**
+
+- **@visactor/vtable**: legend and title component position calculation logic [#4965](https://github.com/VisActor/VTable/issues/4965)
+
+
+
+[more detail about v1.23.1](https://github.com/VisActor/VTable/releases/tag/v1.23.1)
+
+# v1.23.0
+
+2026-01-29
+
+
+**🆕 New feature**
+
+- **@visactor/vtable-sheet**: add event system for vtable sheet [#4861](https://github.com/VisActor/VTable/issues/4861)
+
+**🐛 Bug fix**
+
+- **@visactor/vtable**: when dimension value is empty string should different from no dimension value [#4935](https://github.com/VisActor/VTable/issues/4935)
+- **@visactor/vtable**: when no columnTree to adjust columnWidthConfig [#4935](https://github.com/VisActor/VTable/issues/4935)
+- **@visactor/vtable**: change dimension value to recalculate totalTree [#4953](https://github.com/VisActor/VTable/issues/4953)
+- **@visactor/vtable**: when change dimenison value should update cached changedTree value
+- **@visactor/vtable**: to update formula after add records
+- **@visactor/vtable**: react type define
+
+**🔨 Refactor**
+
+- **@visactor/vtable**: pivotTable have to distinguishing no dimension and dimension value is null character string
+
+
+
+[more detail about v1.23.0](https://github.com/VisActor/VTable/releases/tag/v1.23.0)
+
+# v1.22.12
+
+2026-01-26
+
+
+**🆕 New feature**
+
+- **@visactor/vtable**: add cancelEditCell method to ListTable and PivotTable APIs
+- **@visactor/vtable**: add selectedStateFilter for pivotChart
+- **@visactor/vtable**: add clearChartState and disableTooltip api
+
+**🐛 Bug fix**
+
+- **@visactor/vtable**: makeSelectCellVisible set false when click row series number [#4942](https://github.com/VisActor/VTable/issues/4942)
+- **@visactor/vtable**: fix last row dimension column width when row series number is enabled [#4946](https://github.com/VisActor/VTable/issues/4946)
+
+**🔨 Refactor**
+
+- **@visactor/vtable**: optimize brush chart interaction
+
+
+
+[more detail about v1.22.12](https://github.com/VisActor/VTable/releases/tag/v1.22.12)
+
+# v1.22.11
+
+2026-01-20
+
+
+**🐛 Bug fix**
+
+- **@visactor/vtable**: prepareEdit occor error [#4871](https://github.com/VisActor/VTable/issues/4871)
+- **@visactor/vtable**: paste to table performance when has prepared edit cell [#4912](https://github.com/VisActor/VTable/issues/4912)
+- **@visactor/vtable**: distinguish null and empty string values in column dimensions
+- **scenegraph**: reset proxy row status when start exceeds end
+- **@visactor/vtable**: time unit computeCountToTimeScale month exactitude [#4909](https://github.com/VisActor/VTable/issues/4909)
+- **@visactor/vtable**: 修复theme配置theme.headerStyle.textStickBaseOnAlign不生效问题
+
+**🆕 New feature**
+
+- **@visactor/vtable**: add showSubTotalsOnTreeNode to dataConfig [#4850](https://github.com/VisActor/VTable/issues/4850)
+
+**🔨 Refactor**
+
+- **@visactor/vtable**: when has merge cells to delete column [#4848](https://github.com/VisActor/VTable/issues/4848)
+- **@visactor/vtable**: update cell merge delete records logic [#4848](https://github.com/VisActor/VTable/issues/4848)
+
+
+
+[more detail about v1.22.11](https://github.com/VisActor/VTable/releases/tag/v1.22.11)
+
+# v1.22.10
+
+2026-01-05
+
+
+**🐛 Bug fix**
+
+- **@visactor/vtable**: fix prepareEdit logic occor some bug
+- **@visactor/vtable-plugins**: fix delete and backbase key cann't delete cells
+- **@visactor/vtable**: rose pivotchart show indicator title problem
+
+
+**🆕 New feature**
+
+- **@visactor/vtable-gantt**: feat: support distanceToTaskBar config
+
+
+
+[more detail about v1.22.10](https://github.com/VisActor/VTable/releases/tag/v1.22.10)
+
+# v1.22.9
+
+2025-12-28
+
+
+**🐛 Bug fix**
+
+- **@visactor/vtable**: toggleSelectAll only in searched item. fix[#4838](https://github.com/VisActor/VTable/issues/4838)
+- **@visactor/vtable**: fix the issue with second-level display length
+- **@visactor/vtable**: pivot chart no left axis case
+- **@visactor/vtable**: show dimension tooltip delay logic error
+- **@visactor/vtable**: editor support keydown chinese [#4847](https://github.com/VisActor/VTable/issues/4847)
+- **@visactor/vtable**: fix filter plugin with sub header
+
+**🔨 Refactor**
+
+- **@visactor/vtable-gantt**: recognize millisecond for gantt taskbar
+- **@visactor/vtable**: when no axis compute col width logic
+- **@visactor/vtable**: when set editCellTrigger keydown input chinese first letter problem [#4847](https://github.com/VisActor/VTable/issues/4847)
+
+[more detail about v1.22.9](https://github.com/VisActor/VTable/releases/tag/v1.22.9)
+
 # v1.22.8
 
 2025-12-17

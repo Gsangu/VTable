@@ -9,7 +9,7 @@ import type {
 } from '../../ts-types';
 import { IconFuncTypeEnum, InteractionState } from '../../ts-types';
 import type { SceneEvent } from '../util';
-import { getCellEventArgsSet, regIndexReg } from '../util';
+import { getCellEventArgsSetWithTable, regIndexReg } from '../util';
 import { TABLE_EVENT_TYPE } from '../../core/TABLE_EVENT_TYPE';
 import type { Group } from '../../scenegraph/graphic/group';
 import { isValid } from '@visactor/vutils';
@@ -27,6 +27,7 @@ import { clearPageSelection } from '../../tools/env';
 export function bindTableGroupListener(eventManager: EventManager) {
   const table = eventManager.table;
   const stateManager = table.stateManager;
+  const getEventArgsSet = (e: FederatedPointerEvent) => getCellEventArgsSetWithTable(e, table);
 
   table.scenegraph.tableGroup.addEventListener('pointermove', (e: FederatedPointerEvent) => {
     const lastX = table.eventManager.LastPointerXY?.x ?? e.x;
@@ -38,7 +39,7 @@ export function bindTableGroupListener(eventManager: EventManager) {
       clearTimeout(eventManager.touchSetTimeout);
       eventManager.touchSetTimeout = undefined;
     }
-    const eventArgsSet = getCellEventArgsSet(e);
+    const eventArgsSet = getEventArgsSet(e);
     // if (stateManager.interactionState === InteractionState.scrolling) {
     //   return;
     // }
@@ -178,10 +179,31 @@ export function bindTableGroupListener(eventManager: EventManager) {
         mergeCellInfo: eventArgsSet.eventArgs?.mergeInfo
       });
     }
+
+    if (
+      (table.theme.scrollStyle.horizontalVisible && table.theme.scrollStyle.horizontalVisible === 'focus') ||
+      (!table.theme.scrollStyle.horizontalVisible && table.theme.scrollStyle.visible === 'focus')
+    ) {
+      // focus 模式下：根据鼠标当前所在的区域，仅显示该区域对应的横向滚动条，
+      // 避免 body/左冻结/右冻结三段滚动条同时展示造成干扰。
+      const relativeX = e.x - table.tableX;
+      const target =
+        table.options.scrollFrozenCols &&
+        table.getFrozenColsOffset?.() > 0 &&
+        relativeX >= 0 &&
+        relativeX < table.getFrozenColsWidth()
+          ? 'frozen'
+          : table.options.scrollRightFrozenCols &&
+            table.getRightFrozenColsOffset?.() > 0 &&
+            relativeX > table.tableNoFrameWidth - table.getRightFrozenColsWidth()
+          ? 'rightFrozen'
+          : 'body';
+      stateManager.showHorizontalScrollBar(false, target);
+    }
   });
 
   table.scenegraph.tableGroup.addEventListener('pointerout', (e: FederatedPointerEvent) => {
-    const eventArgsSet = getCellEventArgsSet(e);
+    const eventArgsSet = getEventArgsSet(e);
     const cellGoup = eventArgsSet?.eventArgs?.target as unknown as Group;
     if (cellGoup?.role === 'table') {
       eventManager.dealTableHover();
@@ -189,7 +211,7 @@ export function bindTableGroupListener(eventManager: EventManager) {
   });
 
   table.scenegraph.tableGroup.addEventListener('pointerover', (e: FederatedPointerEvent) => {
-    const eventArgsSet = getCellEventArgsSet(e);
+    const eventArgsSet = getEventArgsSet(e);
     const cellGoup = eventArgsSet?.eventArgs?.target as unknown as Group;
     // console.log('pointerover', cellGoup);
 
@@ -266,7 +288,19 @@ export function bindTableGroupListener(eventManager: EventManager) {
       (table.theme.scrollStyle.horizontalVisible && table.theme.scrollStyle.horizontalVisible === 'focus') ||
       (!table.theme.scrollStyle.horizontalVisible && table.theme.scrollStyle.visible === 'focus')
     ) {
-      stateManager.showHorizontalScrollBar();
+      const relativeX = e.x - table.tableX;
+      const target =
+        table.options.scrollFrozenCols &&
+        table.getFrozenColsOffset?.() > 0 &&
+        relativeX >= 0 &&
+        relativeX < table.getFrozenColsWidth()
+          ? 'frozen'
+          : table.options.scrollRightFrozenCols &&
+            table.getRightFrozenColsOffset?.() > 0 &&
+            relativeX > table.tableNoFrameWidth - table.getRightFrozenColsWidth()
+          ? 'rightFrozen'
+          : 'body';
+      stateManager.showHorizontalScrollBar(false, target);
     }
     if (
       (table.theme.scrollStyle.verticalVisible && table.theme.scrollStyle.verticalVisible === 'focus') ||
@@ -292,16 +326,15 @@ export function bindTableGroupListener(eventManager: EventManager) {
       stateManager.updateCursor();
     }
 
-    if (
-      (table.theme.scrollStyle.horizontalVisible && table.theme.scrollStyle.horizontalVisible === 'focus') ||
-      (!table.theme.scrollStyle.horizontalVisible && table.theme.scrollStyle.visible === 'focus')
-    ) {
+    const scrollStyle = table.theme.scrollStyle;
+    const horizontalVisible = scrollStyle?.horizontalVisible ?? scrollStyle?.visible;
+    const verticalVisible = scrollStyle?.verticalVisible ?? scrollStyle?.visible;
+    const barToSide = scrollStyle?.barToSide ?? false;
+
+    if (!barToSide && horizontalVisible === 'focus') {
       stateManager.hideHorizontalScrollBar();
     }
-    if (
-      (table.theme.scrollStyle.verticalVisible && table.theme.scrollStyle.verticalVisible === 'focus') ||
-      (!table.theme.scrollStyle.verticalVisible && table.theme.scrollStyle.visible === 'focus')
-    ) {
+    if (!barToSide && verticalVisible === 'focus') {
       stateManager.hideVerticalScrollBar();
     }
 
@@ -415,14 +448,15 @@ export function bindTableGroupListener(eventManager: EventManager) {
       // 只处理左键
       return;
     }
-    const eventArgsSet: SceneEvent = getCellEventArgsSet(e);
+    const eventArgsSet: SceneEvent = getEventArgsSet(e);
     eventManager.downIcon = undefined;
     if (stateManager.interactionState !== InteractionState.default) {
       return;
     }
     //处理当点击到的不是图表上时 更新图表的状态为空
     if (table.isPivotChart() && eventArgsSet?.eventArgs?.target.type !== 'chart') {
-      table.scenegraph.updateChartState(null);
+      table.scenegraph.updateChartState(null, undefined);
+      table.scenegraph.deactivateChart(-1, -1, true); // 释放brushingChartInstance
     }
     // 处理menu
     if ((eventArgsSet.eventArgs?.target as any) !== stateManager.residentHoverIcon?.icon) {
@@ -520,7 +554,8 @@ export function bindTableGroupListener(eventManager: EventManager) {
           ) {
             // eventManager.startColumnResize(e);
             // eventManager._resizing = true;
-            table.scenegraph.updateChartState(null);
+            table.scenegraph.updateChartState(null, undefined);
+            table.scenegraph.deactivateChart(-1, -1, true); // 释放brushingChartInstance
             stateManager.updateInteractionState(InteractionState.grabing);
             return;
           }
@@ -562,7 +597,7 @@ export function bindTableGroupListener(eventManager: EventManager) {
         stateManager.updateInteractionState(InteractionState.grabing);
       }
       if ((table as any).hasListeners(TABLE_EVENT_TYPE.MOUSEDOWN_CELL)) {
-        const eventArgsSet: SceneEvent = getCellEventArgsSet(e);
+        const eventArgsSet: SceneEvent = getEventArgsSet(e);
         if (eventArgsSet.eventArgs) {
           table.fireListeners(TABLE_EVENT_TYPE.MOUSEDOWN_CELL, {
             col: eventArgsSet.eventArgs.col,
@@ -582,15 +617,20 @@ export function bindTableGroupListener(eventManager: EventManager) {
       // 只处理左键
       return;
     }
+    const endedResizeCol = stateManager.isResizeCol();
+    const endedResizeRow = stateManager.isResizeRow();
+    const endedMoveCol = stateManager.isMoveCol();
+    // const endedDragSelect = stateManager.isSelecting() && table.eventManager.isDraging;
+    const shouldSkipClickCell = endedResizeCol || endedResizeRow;
     if (stateManager.interactionState === 'grabing') {
       // stateManager.interactionState = 'default';
       stateManager.updateInteractionState(InteractionState.default);
       // eventManager._resizing = false;
-      if (stateManager.isResizeCol()) {
+      if (endedResizeCol) {
         endResizeCol(table);
-      } else if (stateManager.isResizeRow()) {
+      } else if (endedResizeRow) {
         endResizeRow(table);
-      } else if (stateManager.isMoveCol()) {
+      } else if (endedMoveCol) {
         // const eventArgsSet: SceneEvent = getCellEventArgsSet(e);
         const endMoveColSuccess = table.stateManager.endMoveCol();
         fireMoveColEventListeners(table, endMoveColSuccess, e.nativeEvent);
@@ -599,7 +639,7 @@ export function bindTableGroupListener(eventManager: EventManager) {
         if (table.stateManager.isFillHandle()) {
           table.stateManager.endFillSelect();
         }
-        const eventArgsSet: SceneEvent = getCellEventArgsSet(e);
+        const eventArgsSet: SceneEvent = getEventArgsSet(e);
         if (
           table.eventManager.isDraging &&
           eventArgsSet.eventArgs &&
@@ -623,9 +663,9 @@ export function bindTableGroupListener(eventManager: EventManager) {
       stateManager.updateInteractionState(InteractionState.default);
       // scroll end
     }
-    if (!table.eventManager.isDraging) {
+    if (!table.eventManager.isDraging && !shouldSkipClickCell) {
       // 从pointertap中挪过来的这段逻辑
-      const eventArgsSet: SceneEvent = getCellEventArgsSet(e);
+      const eventArgsSet: SceneEvent = getEventArgsSet(e);
       if (
         !eventManager.isTouchMove &&
         e.button === 0 &&
@@ -665,7 +705,7 @@ export function bindTableGroupListener(eventManager: EventManager) {
 
     // console.log('DRAG_SELECT_END');
     if ((table as any).hasListeners(TABLE_EVENT_TYPE.MOUSEUP_CELL)) {
-      const eventArgsSet: SceneEvent = getCellEventArgsSet(e);
+      const eventArgsSet: SceneEvent = getEventArgsSet(e);
       if (eventArgsSet.eventArgs) {
         table.fireListeners(TABLE_EVENT_TYPE.MOUSEUP_CELL, {
           col: eventArgsSet.eventArgs.col,
@@ -686,7 +726,7 @@ export function bindTableGroupListener(eventManager: EventManager) {
   });
 
   table.scenegraph.tableGroup.addEventListener('rightdown', (e: FederatedPointerEvent) => {
-    const eventArgsSet: SceneEvent = getCellEventArgsSet(e);
+    const eventArgsSet: SceneEvent = getEventArgsSet(e);
     // 右键点击
     if (eventArgsSet.eventArgs) {
       stateManager.triggerContextMenu(
@@ -721,7 +761,8 @@ export function bindTableGroupListener(eventManager: EventManager) {
         }
 
         const disableSelectOnContextMenu = table.options.select?.disableSelectOnContextMenu;
-        if (!cellInRange && !disableSelectOnContextMenu) {
+
+        if (!cellInRange && !disableSelectOnContextMenu && eventArgsSet?.eventArgs?.target.type !== 'chart') {
           table.selectCell(col, row);
         }
 
@@ -772,7 +813,7 @@ export function bindTableGroupListener(eventManager: EventManager) {
     if (table.stateManager.columnResize.resizing) {
       return;
     }
-    const eventArgsSet: SceneEvent = getCellEventArgsSet(e);
+    const eventArgsSet: SceneEvent = getEventArgsSet(e);
     // 触发click_cell事件的逻辑挪到了pointerup中
     // if (
     //   !eventManager.isTouchMove &&
@@ -825,7 +866,8 @@ export function bindTableGroupListener(eventManager: EventManager) {
       // 通过这个变量判断非drag鼠标拖拽状态，就不再增加其他变量isDrag了（touchSetTimeout如果拖拽过会变成undefined pointermove事件有置为undefined）
       if (e.pointerType === 'touch') {
         // 移动端事件特殊处理
-        const eventArgsSet: SceneEvent = getCellEventArgsSet(e);
+        const eventArgsSet: SceneEvent = getEventArgsSet(e);
+        // replaced by getEventArgsSet above
         if (eventManager.touchSetTimeout) {
           clearTimeout(eventManager.touchSetTimeout);
           const isHasSelected = !!stateManager.select.ranges?.length;
@@ -838,7 +880,7 @@ export function bindTableGroupListener(eventManager: EventManager) {
   });
   // stage 的pointerdown监听
   table.scenegraph.stage.addEventListener('pointerdown', (e: FederatedPointerEvent) => {
-    const eventArgsSet: SceneEvent = getCellEventArgsSet(e);
+    const eventArgsSet: SceneEvent = getCellEventArgsSetWithTable(e, table);
     if (
       !eventArgsSet.eventArgs?.target ||
       (eventArgsSet.eventArgs?.target as any) !== stateManager.residentHoverIcon?.icon
@@ -868,7 +910,8 @@ export function bindTableGroupListener(eventManager: EventManager) {
       ) {
         // eventManager.startColumnResize(e);
         // eventManager._resizing = true;
-        table.scenegraph.updateChartState(null);
+        table.scenegraph.updateChartState(null, undefined);
+        table.scenegraph.deactivateChart(-1, -1, true); // 释放brushingChartInstance
         stateManager.updateInteractionState(InteractionState.grabing);
 
         // 调整列宽最后一列有外扩了8px  需要将其考虑到table中 需要触发下MOUSEDOWN_TABLE事件
@@ -934,14 +977,71 @@ export function bindTableGroupListener(eventManager: EventManager) {
       stateManager.endSelectCells(true, isHasSelected);
 
       stateManager.updateCursor();
-      table.scenegraph.updateChartState(null);
+      table.scenegraph.updateChartState(null, undefined);
+      // 如果有brush状态的图表，dealTableHover方法无法将其释放，所以需要强制释放
+      table.scenegraph.deactivateChart(-1, -1, true); // 释放brushingChartInstance
     } else if (table.eventManager.isDraging && stateManager.isSelecting()) {
       // 如果鼠标拖拽后是否 则结束选中
       stateManager.endSelectCells();
     }
   });
+  // 当 barToSide=true 且 visible='focus' 时，hover 到整个 canvas 区域都应显示滚动条
+  const scrollStyle = table.theme.scrollStyle;
+  const barToSide = scrollStyle?.barToSide ?? false;
+  const horizontalVisible = scrollStyle?.horizontalVisible ?? scrollStyle?.visible;
+  const verticalVisible = scrollStyle?.verticalVisible ?? scrollStyle?.visible;
+  const shouldShowScrollOnCanvasHover = barToSide && horizontalVisible === 'focus';
+  const shouldShowVScrollOnCanvasHover = barToSide && verticalVisible === 'focus';
+
+  if (shouldShowScrollOnCanvasHover || shouldShowVScrollOnCanvasHover) {
+    table.scenegraph.stage.addEventListener('pointerenter', (e: FederatedPointerEvent) => {
+      // 检查事件是否来自当前表格的 canvas 区域（包括空白区域）
+      const target = e.target as any;
+      const isEventFromCurrentTableCanvas =
+        target === table.scenegraph.stage || target?.isDescendantsOf?.(table.scenegraph.stage);
+      if (!isEventFromCurrentTableCanvas) {
+        return;
+      }
+      if (shouldShowScrollOnCanvasHover) {
+        const relativeX = e.x - table.tableX;
+        const target =
+          table.options.scrollFrozenCols &&
+          table.getFrozenColsOffset?.() > 0 &&
+          relativeX >= 0 &&
+          relativeX < table.getFrozenColsWidth()
+            ? 'frozen'
+            : table.options.scrollRightFrozenCols &&
+              table.getRightFrozenColsOffset?.() > 0 &&
+              relativeX > table.tableNoFrameWidth - table.getRightFrozenColsWidth()
+            ? 'rightFrozen'
+            : 'body';
+        stateManager.showHorizontalScrollBar(false, target);
+      }
+      if (shouldShowVScrollOnCanvasHover) {
+        stateManager.showVerticalScrollBar();
+      }
+    });
+
+    table.scenegraph.stage.addEventListener('pointerleave', (e: FederatedPointerEvent) => {
+      // 检查鼠标是否离开了整个 canvas 区域
+      const relatedTarget = e.relatedTarget as any;
+      const isLeavingCanvas =
+        !relatedTarget ||
+        (relatedTarget !== table.scenegraph.stage && !relatedTarget.isDescendantsOf?.(table.scenegraph.stage));
+      if (!isLeavingCanvas) {
+        return;
+      }
+      if (shouldShowScrollOnCanvasHover) {
+        stateManager.hideHorizontalScrollBar();
+      }
+      if (shouldShowVScrollOnCanvasHover) {
+        stateManager.hideVerticalScrollBar();
+      }
+    });
+  }
+
   table.scenegraph.stage.addEventListener('pointermove', (e: FederatedPointerEvent) => {
-    const eventArgsSet: SceneEvent = getCellEventArgsSet(e);
+    const eventArgsSet: SceneEvent = getCellEventArgsSetWithTable(e, table);
 
     // 检查事件是否来自当前表格的有效区域
     const isEventFromCurrentTable = e.target?.isDescendantsOf?.(table.scenegraph.tableGroup) ?? false;
@@ -982,7 +1082,7 @@ export function bindTableGroupListener(eventManager: EventManager) {
   // });
 
   table.scenegraph.tableGroup.addEventListener('checkbox_state_change', (e: FederatedPointerEvent) => {
-    const eventArgsSet: SceneEvent = getCellEventArgsSet(e);
+    const eventArgsSet: SceneEvent = getEventArgsSet(e);
     const { col, row } = eventArgsSet.eventArgs;
     const cellInfo = table.getCellInfo(col, row);
 
@@ -1052,7 +1152,7 @@ export function bindTableGroupListener(eventManager: EventManager) {
   });
 
   table.scenegraph.tableGroup.addEventListener('radio_checked', (e: FederatedPointerEvent) => {
-    const eventArgsSet: SceneEvent = getCellEventArgsSet(e);
+    const eventArgsSet: SceneEvent = getEventArgsSet(e);
     const { col, row, target } = eventArgsSet.eventArgs;
     const cellInfo = table.getCellInfo(col, row);
     const indexInCell: string | undefined = regIndexReg.exec(target.id as string)?.[1];
@@ -1137,7 +1237,7 @@ export function bindTableGroupListener(eventManager: EventManager) {
   });
 
   table.scenegraph.tableGroup.addEventListener('switch_state_change', (e: FederatedPointerEvent) => {
-    const eventArgsSet: SceneEvent = getCellEventArgsSet(e);
+    const eventArgsSet: SceneEvent = getEventArgsSet(e);
     const { col, row, target } = eventArgsSet.eventArgs;
     const cellInfo = table.getCellInfo(col, row);
 
@@ -1181,6 +1281,14 @@ export function bindTableGroupListener(eventManager: EventManager) {
     const legend: any = e.path.find(node => (node as any).name === 'legend');
     if (!legend) {
       table.editorManager?.completeEdit();
+      // 滚动后 选中图元的状态希望能保留 所以这里不更新chart状态
+      // table.scenegraph.updateChartState(null, undefined);
+      //#region 释放当前激活单元格的图表实例  本身会走到dealhover中的deactivateChart方法，但开发饼图联动时候，因为是整个可视区域的chart都被激活了，所以也需要全部释放。chart.ts文件中的deactivate方法需要区分这个scroll情况导致的全部释放。
+      const { cellPos } = table.stateManager.hover;
+      const prevHoverCellCol = cellPos.col;
+      const prevHoverCellRow = cellPos.row;
+      table.scenegraph.deactivateChart(prevHoverCellCol, prevHoverCellRow, true);
+      //#endregion
       if (table.eventManager._enableTableScroll) {
         handleWhell(e, stateManager);
       }
@@ -1227,7 +1335,11 @@ export function endResizeRow(table: BaseTableAPI) {
 }
 
 function dblclickHandler(e: FederatedPointerEvent, table: BaseTableAPI) {
-  const eventArgsSet: SceneEvent = getCellEventArgsSet(e);
+  if (typeof e.button === 'number' && e.button !== 0) {
+    return;
+  }
+
+  const eventArgsSet: SceneEvent = getCellEventArgsSetWithTable(e, table);
   let col = -1;
   let row = -1;
   if (eventArgsSet.eventArgs) {

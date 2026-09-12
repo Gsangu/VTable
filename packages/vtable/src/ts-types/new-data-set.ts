@@ -39,6 +39,8 @@ export interface Total {
   showGrandTotals: boolean;
   /** 是否显示小计;  如果配置了total对象，showSubTotals默认为true */
   showSubTotals: boolean;
+  /** 是否在树节点上显示聚合数据; 不需要开启showSubTotals小计就能折叠后显示聚合数据 */
+  showSubTotalsOnTreeNode?: boolean;
 
   // // 计算总计方法
   // calcGrandTotals?: CalcTotals;
@@ -46,6 +48,8 @@ export interface Total {
   // calcSubTotals?: CalcTotals;
   /** 小计汇总维度定义 */
   subTotalsDimensions?: string[];
+  /** 总计中保留的下级维度，用于按维度分组显示总计 */
+  grandTotalDimensions?: string[];
   /** 汇总节点显示名称  默认'总计' */
   grandTotalLabel?: string;
   /** 汇总节点显示名称  默认'小计' */

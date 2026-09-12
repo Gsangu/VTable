@@ -41,6 +41,8 @@ TABLE_EVENT_TYPE = {
   RESIZE_COLUMN_END: 'resize_column_end',
   RESIZE_ROW: 'resize_row',
   RESIZE_ROW_END: 'resize_row_end',
+  MERGE_CELLS: 'merge_cells',
+  UNMERGE_CELLS: 'unmerge_cells',
   CHANGE_HEADER_POSITION: 'change_header_position',
   CHANGE_HEADER_POSITION_START: 'change_header_position_start',
   CHANGING_HEADER_POSITION: 'changing_header_position',
@@ -259,6 +261,34 @@ TABLE_EVENT_TYPE = {
     rowHeight: number
   }
 
+```
+
+## MERGE_CELLS
+
+`mergeCells` 调用成功后触发。
+
+回调参数：
+```ts
+{
+  startCol: number;
+  startRow: number;
+  endCol: number;
+  endRow: number;
+}
+```
+
+## UNMERGE_CELLS
+
+`unmergeCells` 调用后触发。
+
+回调参数：
+```ts
+{
+  startCol: number;
+  startRow: number;
+  endCol: number;
+  endRow: number;
+}
 ```
 
 ## CHANGE_HEADER_POSITION
@@ -628,6 +658,31 @@ MousePointerCellEvent & { axisPosition: 'left' | 'right' | 'top' | 'bottom' };
 { col: number; row: number; rawValue: string | number;currentValue: string | number; changedValue: string | number };
 
 ```
+
+## CHANGE_CELL_VALUES
+
+批量更改单元格值的聚合事件。
+
+事件回调函数的参数类型:
+
+```
+{
+  values: Array<{
+    col: number;
+    row: number;
+    recordIndex?: number | number[];
+    field?: string | number;
+    rawValue: string | number;
+    currentValue: string | number;
+    changedValue: string | number;
+  }>;
+};
+```
+
+**说明：**
+
+- 相关接口参数 `noTriggerChangeCellValuesEvent` 可用于抑制该聚合事件。
+- 批量更新多个单元格时通常只触发一次该事件，`values` 中包含所有变更项。
 
 ## CHECKBOX_STATE_CHANGE
 

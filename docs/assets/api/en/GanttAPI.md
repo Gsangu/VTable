@@ -89,6 +89,28 @@ Update a specific data record
   updateTaskRecord(record: any, task_index: number, sub_task_index: number): void;
 ```
 
+### getBaselineInfoByTaskListIndex(Function)
+
+Get baseline information (baseline start/end date and baseline days) for the task at the specified list index. If the task has no baseline or it is outside the current date range, the returned dates are `null` and days is `0`.
+
+```
+getBaselineInfoByTaskListIndex(
+  taskShowIndex: number,
+  sub_task_index?: number | number[]
+): {
+  baselineStartDate: Date | null;
+  baselineEndDate: Date | null;
+  baselineDays: number;
+}
+```
+
+Example:
+
+```
+const info = ganttInstance.getBaselineInfoByTaskListIndex(0);
+// info.baselineStartDate / info.baselineEndDate / info.baselineDays
+```
+
 ### release(Function)
 
 Release the Gantt instance
@@ -127,12 +149,12 @@ Get or set the horizontal scroll value to a specified position.
 Get the position of the task bar. The position relative to the top-left corner of the Gantt chart.
 
 ```
-  getTaskBarRelativeRect:(index: number) =>{
+  getTaskBarRelativeRect:(index: number, sub_task_index?: number) =>{
     left: number;
     top: number;
     width: number;
     height: number;
-  }
+  } | null
 ```
 
 ## Events

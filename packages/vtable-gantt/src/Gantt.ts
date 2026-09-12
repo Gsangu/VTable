@@ -54,7 +54,6 @@ import {
 } from './gantt-helper';
 import { EventTarget } from './event/EventTarget';
 import {
-  computeCountToTimeScale,
   createDateAtLastHour,
   createDateAtLastMillisecond,
   createDateAtLastMinute,
@@ -85,6 +84,9 @@ export function createRootElement(padding: any, className: string = 'vtable-gant
 
   return element;
 }
+
+const DEFAULT_TIMELINE_SCALE: ITimelineScale = { unit: 'day', step: 1 };
+
 export class Gantt extends EventTarget {
   options: GanttConstructorOptions;
   container: HTMLElement;
@@ -136,6 +138,7 @@ export class Gantt extends EventTarget {
     taskBarStyle: ITaskBarStyle | ((interactionArgs: TaskBarInteractionArgumentType) => ITaskBarStyle);
     taskBarMilestoneStyle: IMilestoneStyle;
     projectBarStyle: ITaskBarStyle | ((interactionArgs: TaskBarInteractionArgumentType) => ITaskBarStyle);
+    baselineStyle: ITaskBarStyle | ((interactionArgs: TaskBarInteractionArgumentType) => ITaskBarStyle);
     /** 里程碑是旋转后的矩形，所以需要计算里程碑的对角线长度 */
     taskBarMilestoneHypotenuse: number;
     taskBarHoverStyle: ITaskBarHoverStyle;
@@ -165,10 +168,14 @@ export class Gantt extends EventTarget {
     tasksShowMode: TasksShowMode;
     projectSubTasksExpandable: boolean;
     taskBarClip: boolean;
+    taskBarLocateIcon: boolean;
 
     startDateField: string;
     endDateField: string;
     progressField: string;
+    baselineStartDateField: string;
+    baselineEndDateField: string;
+    baselinePosition: 'top' | 'bottom' | 'overlap';
     minDate: Date;
     maxDate: Date;
     _minDateTime: number;
@@ -200,6 +207,7 @@ export class Gantt extends EventTarget {
     dependencyLinkLineCreatePointStyle: IPointStyle;
     dependencyLinkLineCreatingPointStyle: IPointStyle;
     dependencyLinkLineCreatingStyle?: ILineStyle;
+    dependencyLinkDistanceToTaskBar?: number;
     underlayBackgroundColor: string;
     eventOptions: IEventOptions;
     keyboardOptions: IKeyboardOptions;
@@ -215,6 +223,10 @@ export class Gantt extends EventTarget {
   //  时间缩放基准 - 每像素代表多少毫秒
   private millisecondsPerPixel: number;
   zoomScaleManager?: ZoomScaleManager;
+  private _timelineColWidths: number[] = [];
+  private _timelineColX: number[] = [];
+  private _timelineColStartTimes: number[] = [];
+  private _timelineColEndTimes: number[] = [];
 
   /**
    * 重新计算时间相关的尺寸参数
@@ -631,6 +643,7 @@ export class Gantt extends EventTarget {
         if (record) {
           return (record.children?.length || 1) * this.parsedOptions.rowHeight;
         }
+        return undefined;
       };
       listTable_options.defaultRowHeight = 'auto';
       listTable_options.customConfig = { forceComputeAllRowHeight: true };
@@ -641,6 +654,7 @@ export class Gantt extends EventTarget {
         if (record) {
           return computeRowsCountByRecordDateForCompact(this, record) * this.parsedOptions.rowHeight;
         }
+        return undefined;
       };
       listTable_options.defaultRowHeight = 'auto';
       listTable_options.customConfig = { forceComputeAllRowHeight: true };
@@ -651,6 +665,7 @@ export class Gantt extends EventTarget {
         if (record) {
           return computeRowsCountByRecordDate(this, record) * this.parsedOptions.rowHeight;
         }
+        return undefined;
       };
       listTable_options.defaultRowHeight = 'auto';
       listTable_options.customConfig = { forceComputeAllRowHeight: true };
@@ -677,45 +692,58 @@ export class Gantt extends EventTarget {
 
   _sortScales() {
     const { timelineHeader } = this.options;
-    if (timelineHeader) {
-      const timelineScales = timelineHeader.scales;
-      const sortOrder = ['year', 'quarter', 'month', 'week', 'day', 'hour', 'minute', 'second'];
-      if (timelineScales.length === 1) {
-        if (
-          timelineScales[0].unit === 'hour' ||
-          timelineScales[0].unit === 'minute' ||
-          timelineScales[0].unit === 'second'
-        ) {
-          this.parsedOptions.timeScaleIncludeHour = true;
-        }
-      }
-      const orderedScales = timelineScales.slice().sort((a, b) => {
-        if (a.unit === 'hour' || a.unit === 'minute' || a.unit === 'second') {
-          this.parsedOptions.timeScaleIncludeHour = true;
-        }
-        const indexA = sortOrder.indexOf(a.unit);
-        const indexB = sortOrder.indexOf(b.unit);
-        if (indexA === -1) {
-          return 1;
-        } else if (indexB === -1) {
-          return -1;
-        }
-        return indexA - indexB;
-      });
-      const reverseOrderedScales = timelineScales.slice().sort((a, b) => {
-        const indexA = sortOrder.indexOf(a.unit);
-        const indexB = sortOrder.indexOf(b.unit);
-        if (indexA === -1) {
-          return 1;
-        } else if (indexB === -1) {
-          return -1;
-        }
-        return indexB - indexA;
-      });
-
-      this.parsedOptions.sortedTimelineScales = orderedScales;
-      this.parsedOptions.reverseSortedTimelineScales = reverseOrderedScales;
+    const zoomLevelScales = this.zoomScaleManager?.config.levels[this.zoomScaleManager.getCurrentLevel()];
+    const defaultTimelineScale: ITimelineScale = { ...DEFAULT_TIMELINE_SCALE };
+    let timelineScales: ITimelineScale[];
+    if (timelineHeader?.scales?.length > 0) {
+      timelineScales = timelineHeader.scales;
+    } else if (zoomLevelScales?.length > 0) {
+      timelineScales = zoomLevelScales;
+    } else {
+      timelineScales = [defaultTimelineScale];
     }
+
+    if (timelineHeader && (!timelineHeader.scales || timelineHeader.scales.length === 0)) {
+      timelineHeader.scales = timelineScales.map(scale => ({ ...scale }));
+    }
+
+    const sortOrder = ['year', 'quarter', 'month', 'week', 'day', 'hour', 'minute', 'second'];
+    this.parsedOptions.timeScaleIncludeHour = false;
+    if (timelineScales.length === 1) {
+      if (
+        timelineScales[0].unit === 'hour' ||
+        timelineScales[0].unit === 'minute' ||
+        timelineScales[0].unit === 'second'
+      ) {
+        this.parsedOptions.timeScaleIncludeHour = true;
+      }
+    }
+    const orderedScales = timelineScales.slice().sort((a, b) => {
+      if (a.unit === 'hour' || a.unit === 'minute' || a.unit === 'second') {
+        this.parsedOptions.timeScaleIncludeHour = true;
+      }
+      const indexA = sortOrder.indexOf(a.unit);
+      const indexB = sortOrder.indexOf(b.unit);
+      if (indexA === -1) {
+        return 1;
+      } else if (indexB === -1) {
+        return -1;
+      }
+      return indexA - indexB;
+    });
+    const reverseOrderedScales = timelineScales.slice().sort((a, b) => {
+      const indexA = sortOrder.indexOf(a.unit);
+      const indexB = sortOrder.indexOf(b.unit);
+      if (indexA === -1) {
+        return 1;
+      } else if (indexB === -1) {
+        return -1;
+      }
+      return indexB - indexA;
+    });
+
+    this.parsedOptions.sortedTimelineScales = orderedScales;
+    this.parsedOptions.reverseSortedTimelineScales = reverseOrderedScales;
   }
 
   _generateTimeLineDateMap() {
@@ -741,6 +769,156 @@ export class Gantt extends EventTarget {
         );
       }
     }
+    this._rebuildTimelineColXMap();
+  }
+
+  private _rebuildTimelineColXMap() {
+    const minScale = this.parsedOptions.reverseSortedTimelineScales?.[0];
+    const timelineDates = minScale?.timelineDates ?? [];
+    const baseWidth = this.parsedOptions.timelineColWidth ?? 0;
+
+    const hideWeekend = this.options?.timelineHeader?.hideWeekend === true;
+    const weekendColWidth = this.options?.timelineHeader?.weekendColWidth;
+    const enableWeekendWidth =
+      minScale?.unit === 'day' && minScale?.step === 1 && (hideWeekend || weekendColWidth !== undefined);
+
+    this._timelineColWidths = new Array(timelineDates.length);
+    this._timelineColX = new Array(timelineDates.length + 1);
+    this._timelineColStartTimes = new Array(timelineDates.length);
+    this._timelineColEndTimes = new Array(timelineDates.length);
+    this._timelineColX[0] = 0;
+
+    let sumX = 0;
+    for (let i = 0; i < timelineDates.length; i++) {
+      const d = timelineDates[i];
+      const startTime = d.startDate?.getTime?.() ?? 0;
+      const endTime = d.endDate?.getTime?.() ?? startTime;
+      this._timelineColStartTimes[i] = startTime;
+      this._timelineColEndTimes[i] = endTime;
+
+      let w = baseWidth;
+      if (enableWeekendWidth) {
+        const day = d.startDate.getDay();
+        const isWeekend = day === 0 || day === 6;
+        if (isWeekend) {
+          if (hideWeekend) {
+            w = 0;
+          } else if (typeof weekendColWidth === 'number') {
+            w = weekendColWidth;
+          } else if (typeof weekendColWidth === 'function') {
+            w = weekendColWidth(baseWidth);
+          }
+        }
+      }
+
+      w = Math.max(0, Number.isFinite(w) ? w : baseWidth);
+      this._timelineColWidths[i] = w;
+      sumX += w;
+      this._timelineColX[i + 1] = sumX;
+    }
+  }
+
+  getXByTime(time: number) {
+    const startTimes = this._timelineColStartTimes;
+    const endTimes = this._timelineColEndTimes;
+    const widths = this._timelineColWidths;
+    const xPrefix = this._timelineColX;
+    if (!startTimes?.length || !endTimes?.length || !widths?.length || !xPrefix?.length) {
+      return 0;
+    }
+    if (time <= startTimes[0]) {
+      return 0;
+    }
+    const lastIndex = endTimes.length - 1;
+    if (time > endTimes[lastIndex]) {
+      return xPrefix[lastIndex + 1] ?? 0;
+    }
+
+    let low = 0;
+    let high = lastIndex;
+    while (low <= high) {
+      const mid = (low + high) >> 1;
+      const st = startTimes[mid];
+      const et = endTimes[mid];
+      if (time < st) {
+        high = mid - 1;
+      } else if (time > et) {
+        low = mid + 1;
+      } else {
+        const duration = Math.max(1, et - st + 1);
+        const offset = (time - st) / duration;
+        return (xPrefix[mid] ?? 0) + (widths[mid] ?? 0) * offset;
+      }
+    }
+
+    const idx = Math.max(0, Math.min(lastIndex, high));
+    const st = startTimes[idx];
+    const et = endTimes[idx];
+    const duration = Math.max(1, et - st + 1);
+    const offset = Math.max(0, Math.min(1, (time - st) / duration));
+    return (xPrefix[idx] ?? 0) + (widths[idx] ?? 0) * offset;
+  }
+
+  getDateIndexByTime(time: number) {
+    const startTimes = this._timelineColStartTimes;
+    const endTimes = this._timelineColEndTimes;
+    if (!startTimes?.length || !endTimes?.length) {
+      return 0;
+    }
+    if (time <= startTimes[0]) {
+      return 0;
+    }
+    const lastIndex = endTimes.length - 1;
+    if (time > endTimes[lastIndex]) {
+      return lastIndex;
+    }
+    let low = 0;
+    let high = lastIndex;
+    while (low <= high) {
+      const mid = (low + high) >> 1;
+      const st = startTimes[mid];
+      const et = endTimes[mid];
+      if (time < st) {
+        high = mid - 1;
+      } else if (time > et) {
+        low = mid + 1;
+      } else {
+        return mid;
+      }
+    }
+    return Math.max(0, Math.min(lastIndex, high));
+  }
+
+  getDateIndexByX(x: number) {
+    const totalX = x + this.stateManager.scroll.horizontalBarPos;
+    const xPrefix = this._timelineColX;
+    if (!xPrefix?.length) {
+      return 0;
+    }
+    if (totalX <= 0) {
+      return 0;
+    }
+    const lastIndex = xPrefix.length - 2;
+    const totalWidth = xPrefix[lastIndex + 1] ?? 0;
+    if (totalX >= totalWidth) {
+      return Math.max(0, lastIndex);
+    }
+
+    let low = 0;
+    let high = lastIndex;
+    while (low <= high) {
+      const mid = (low + high) >> 1;
+      const left = xPrefix[mid] ?? 0;
+      const right = xPrefix[mid + 1] ?? left;
+      if (totalX < left) {
+        high = mid - 1;
+      } else if (totalX >= right) {
+        low = mid + 1;
+      } else {
+        return mid;
+      }
+    }
+    return Math.max(0, Math.min(lastIndex, low));
   }
   getRowHeightByIndex(index: number) {
     if (this.taskListTableInstance) {
@@ -775,6 +953,10 @@ export class Gantt extends EventTarget {
     // return (this.parsedOptions.timeLineHeaderRowHeights as number) * this.timeLineHeaderLevel;
   }
   getAllDateColsWidth() {
+    const xPrefix = this._timelineColX;
+    if (xPrefix?.length) {
+      return xPrefix[xPrefix.length - 1] ?? 0;
+    }
     return (
       this.parsedOptions.timelineColWidth *
       (this.parsedOptions.reverseSortedTimelineScales[0].timelineDates?.length ?? 0)
@@ -845,12 +1027,12 @@ export class Gantt extends EventTarget {
     return this.records[taskShowIndex];
   }
 
-  _refreshTaskBar(taskShowIndex: number, sub_task_index?: number) {
+  _refreshTaskBar(taskShowIndex: number, sub_task_index?: number | number[]) {
     // this.taskListTableInstance.updateRecords([record], [index]);
     this.scenegraph.taskBar.updateTaskBarNode(taskShowIndex, sub_task_index);
     this.scenegraph.refreshRecordLinkNodes(
       taskShowIndex,
-      undefined,
+      sub_task_index,
       this.scenegraph.taskBar.getTaskBarNodeByIndex(taskShowIndex, sub_task_index) as GanttTaskBarNode
     );
     this.scenegraph.updateNextFrame();
@@ -874,6 +1056,26 @@ export class Gantt extends EventTarget {
     //   );
     // }
     this.taskListTableInstance.updateRecords([record], [index]);
+  }
+  private _refreshSortedTaskBarsAfterRecordUpdate(recordIndex: number | number[], taskShowIndex: number) {
+    const sortState = this.taskListTableInstance?.sortState;
+    if (!sortState || (Array.isArray(sortState) && sortState.length === 0)) {
+      return false;
+    }
+
+    const nextTaskShowIndex = this.getTaskShowIndexByRecordIndex(recordIndex);
+    if (!isValid(nextTaskShowIndex) || nextTaskShowIndex === taskShowIndex) {
+      return false;
+    }
+
+    this._syncPropsFromTable();
+    this.scenegraph.refreshTaskBarsAndGrid();
+
+    const left = this.stateManager.scroll.horizontalBarPos;
+    const top = this.stateManager.scroll.verticalBarPos;
+    this.scenegraph.setX(-left);
+    this.scenegraph.setY(-top);
+    return true;
   }
   /**
    * 获取指定index处任务数据的具体信息
@@ -961,6 +1163,81 @@ export class Gantt extends EventTarget {
     };
   }
 
+  getBaselineInfoByTaskListIndex(
+    taskShowIndex: number,
+    sub_task_index?: number | number[]
+  ): {
+    baselineStartDate: Date | null;
+    baselineEndDate: Date | null;
+    baselineDays: number;
+  } {
+    const taskRecord = this.getRecordByIndex(taskShowIndex, sub_task_index);
+    const baselineStartDateField = this.parsedOptions.baselineStartDateField;
+    const baselineEndDateField = this.parsedOptions.baselineEndDateField;
+
+    if (
+      !baselineStartDateField ||
+      !baselineEndDateField ||
+      !taskRecord?.[baselineStartDateField] ||
+      !taskRecord?.[baselineEndDateField]
+    ) {
+      return {
+        baselineStartDate: null,
+        baselineEndDate: null,
+        baselineDays: 0
+      };
+    }
+
+    const rawBaselineStartDateTime = createDateAtMidnight(taskRecord?.[baselineStartDateField]).getTime();
+    const rawBaselineEndDateTime = createDateAtMidnight(taskRecord?.[baselineEndDateField]).getTime();
+
+    if (
+      rawBaselineEndDateTime < this.parsedOptions._minDateTime ||
+      rawBaselineStartDateTime > this.parsedOptions._maxDateTime
+    ) {
+      return {
+        baselineStartDate: null,
+        baselineEndDate: null,
+        baselineDays: 0
+      };
+    }
+
+    let baselineStartDate;
+    let baselineEndDate;
+    if (this.parsedOptions.timeScaleIncludeHour) {
+      baselineStartDate = createDateAtMidnight(
+        Math.min(Math.max(this.parsedOptions._minDateTime, rawBaselineStartDateTime), this.parsedOptions._maxDateTime)
+      );
+      const rawEnd = taskRecord?.[baselineEndDateField];
+      let hasMillisecondProvided = false;
+      if (typeof rawEnd === 'string') {
+        hasMillisecondProvided = /:\d{2}\.\d+/.test(rawEnd);
+      }
+      const shouldForceMillisecond = !hasMillisecondProvided;
+      baselineEndDate = createDateAtLastMillisecond(
+        Math.max(Math.min(this.parsedOptions._maxDateTime, rawBaselineEndDateTime), this.parsedOptions._minDateTime),
+        shouldForceMillisecond
+      );
+    } else {
+      baselineStartDate = createDateAtMidnight(
+        Math.min(Math.max(this.parsedOptions._minDateTime, rawBaselineStartDateTime), this.parsedOptions._maxDateTime),
+        true
+      );
+      baselineEndDate = createDateAtLastHour(
+        Math.max(Math.min(this.parsedOptions._maxDateTime, rawBaselineEndDateTime), this.parsedOptions._minDateTime),
+        true
+      );
+    }
+
+    const baselineDays = (baselineEndDate.getTime() - baselineStartDate.getTime() + 1) / (1000 * 60 * 60 * 24);
+
+    return {
+      baselineStartDate,
+      baselineEndDate,
+      baselineDays
+    };
+  }
+
   /**
    * 更新任务的开始日期
    * @param startDate 新的开始日期
@@ -977,19 +1254,21 @@ export class Gantt extends EventTarget {
 
     if (!isValid(sub_task_index)) {
       //子任务不是独占左侧表格一行的情况
-      const indexs = this.getRecordIndexByTaskShowIndex(index);
-      this._updateRecordToListTable(taskRecord, indexs);
+      const recordIndex = this.getRecordIndexByTaskShowIndex(index);
+      this._updateRecordToListTable(taskRecord, Array.isArray(recordIndex) ? recordIndex : index);
       // 递归更新父级project任务的时间范围
-      if (Array.isArray(indexs)) {
-        this.stateManager.updateProjectTaskTimes(indexs);
+      if (Array.isArray(recordIndex)) {
+        this.stateManager.updateProjectTaskTimes(recordIndex);
       }
+      this._refreshSortedTaskBarsAfterRecordUpdate(recordIndex, index);
     } else if (Array.isArray(sub_task_index)) {
+      this._updateRecordToListTable(taskRecord, sub_task_index);
       // 递归更新父级project任务的时间范围
       this.stateManager.updateProjectTaskTimes(sub_task_index);
     }
   }
 
-  _updateEndDateToTaskRecord(endDate: Date, index: number, sub_task_index?: number) {
+  _updateEndDateToTaskRecord(endDate: Date, index: number, sub_task_index?: number | number[]) {
     const taskRecord = this.getRecordByIndex(index, sub_task_index);
     const endDateField = this.parsedOptions.endDateField;
     const dateFormat = this.parsedOptions.dateFormat ?? parseDateFormat(taskRecord[endDateField]);
@@ -998,19 +1277,21 @@ export class Gantt extends EventTarget {
     taskRecord[endDateField] = newEndDate;
     if (!isValid(sub_task_index)) {
       //子任务不是独占左侧表格一行的情况
-      const indexs = this.getRecordIndexByTaskShowIndex(index);
-      this._updateRecordToListTable(taskRecord, indexs);
+      const recordIndex = this.getRecordIndexByTaskShowIndex(index);
+      this._updateRecordToListTable(taskRecord, Array.isArray(recordIndex) ? recordIndex : index);
       // 递归更新父级project任务的时间范围
-      if (Array.isArray(indexs)) {
-        this.stateManager.updateProjectTaskTimes(indexs);
+      if (Array.isArray(recordIndex)) {
+        this.stateManager.updateProjectTaskTimes(recordIndex);
       }
+      this._refreshSortedTaskBarsAfterRecordUpdate(recordIndex, index);
     } else if (Array.isArray(sub_task_index)) {
+      this._updateRecordToListTable(taskRecord, sub_task_index);
       // 递归更新父级project任务的时间范围
       this.stateManager.updateProjectTaskTimes(sub_task_index);
     }
   }
 
-  _updateStartEndDateToTaskRecord(startDate: Date, endDate: Date, index: number, sub_task_index?: number) {
+  _updateStartEndDateToTaskRecord(startDate: Date, endDate: Date, index: number, sub_task_index?: number | number[]) {
     const taskRecord = this.getRecordByIndex(index, sub_task_index);
     const startDateField = this.parsedOptions.startDateField;
     const endDateField = this.parsedOptions.endDateField;
@@ -1020,14 +1301,16 @@ export class Gantt extends EventTarget {
     const newEndDate = formatDate(endDate, dateFormat);
     taskRecord[endDateField] = newEndDate;
     if (!isValid(sub_task_index)) {
-      const indexs = this.getRecordIndexByTaskShowIndex(index);
+      const recordIndex = this.getRecordIndexByTaskShowIndex(index);
       //子任务不是独占左侧表格一行的情况
-      this._updateRecordToListTable(taskRecord, indexs);
+      this._updateRecordToListTable(taskRecord, Array.isArray(recordIndex) ? recordIndex : index);
       // 递归更新父级project任务的时间范围
-      if (Array.isArray(indexs)) {
-        this.stateManager.updateProjectTaskTimes(indexs);
+      if (Array.isArray(recordIndex)) {
+        this.stateManager.updateProjectTaskTimes(recordIndex);
       }
+      this._refreshSortedTaskBarsAfterRecordUpdate(recordIndex, index);
     } else if (Array.isArray(sub_task_index)) {
+      this._updateRecordToListTable(taskRecord, sub_task_index);
       // 递归更新父级project任务的时间范围
       this.stateManager.updateProjectTaskTimes(sub_task_index);
     }
@@ -1039,14 +1322,21 @@ export class Gantt extends EventTarget {
    * @param index 对应的一定是左侧表格body的index
    * @param sub_task_index 子任务的index, 当taskShowMode是sub_tasks_*模式时，会传入sub_task_index。如果是tasks_separate模式，sub_task_index传入undefined。
    */
-  _updateProgressToTaskRecord(progress: number, index: number, sub_task_index?: number) {
+  _updateProgressToTaskRecord(progress: number, index: number, sub_task_index?: number | number[]) {
     const taskRecord = this.getRecordByIndex(index, sub_task_index);
     const progressField = this.parsedOptions.progressField;
     if (progressField) {
       taskRecord[progressField] = progress;
-      const indexs = this.getRecordIndexByTaskShowIndex(index);
-      this._updateRecordToListTable(taskRecord, indexs);
-      this._refreshTaskBar(index, sub_task_index);
+      if (Array.isArray(sub_task_index)) {
+        this._updateRecordToListTable(taskRecord, sub_task_index);
+        this._refreshTaskBar(index, sub_task_index);
+        return;
+      }
+      const recordIndex = this.getRecordIndexByTaskShowIndex(index);
+      this._updateRecordToListTable(taskRecord, Array.isArray(recordIndex) ? recordIndex : index);
+      if (!this._refreshSortedTaskBarsAfterRecordUpdate(recordIndex, index)) {
+        this._refreshTaskBar(index, sub_task_index);
+      }
     }
   }
 
@@ -1071,11 +1361,11 @@ export class Gantt extends EventTarget {
    * 如果TasksShowModes是 sub_tasks_*** 模式 则需要传入task_index和sub_task_index
    */
   updateTaskRecord(record: any, task_index: number | number[]): void;
-  updateTaskRecord(record: any, task_index: number, sub_task_index: number): void;
-  updateTaskRecord(record: any, task_index: number | number[], sub_task_index?: number) {
+  updateTaskRecord(record: any, task_index: number, sub_task_index: number | number[]): void;
+  updateTaskRecord(record: any, task_index: number | number[], sub_task_index?: number | number[]) {
     if (isValid(sub_task_index)) {
       const index = typeof task_index === 'number' ? task_index : task_index[0];
-      this._updateRecordToListTable(record, [index, sub_task_index]);
+      this._updateRecordToListTable(record, Array.isArray(sub_task_index) ? sub_task_index : [index, sub_task_index]);
       this._refreshTaskBar(index, sub_task_index);
       return;
     }
@@ -1306,10 +1596,7 @@ export class Gantt extends EventTarget {
   /** 滚动到scrollToMarkLineDate所指向的日期 */
   _scrollToMarkLine() {
     if (this.parsedOptions.scrollToMarkLineDate && this.parsedOptions.minDate) {
-      const minDate = this.parsedOptions.minDate;
-      const { unit, step } = this.parsedOptions.reverseSortedTimelineScales[0];
-      const count = computeCountToTimeScale(this.parsedOptions.scrollToMarkLineDate, minDate, unit, step);
-      const targetDayDistance = count * this.parsedOptions.timelineColWidth;
+      const targetDayDistance = this.getXByTime(this.parsedOptions.scrollToMarkLineDate.getTime());
       const left = targetDayDistance - this.tableNoFrameWidth / 2;
       this.stateManager.setScrollLeft(left);
     }
@@ -1319,10 +1606,7 @@ export class Gantt extends EventTarget {
     if (!date || !this.parsedOptions.minDate) {
       return;
     }
-    const minDate = this.parsedOptions.minDate;
-    const { unit, step } = this.parsedOptions.reverseSortedTimelineScales[0];
-    const count = computeCountToTimeScale(date, minDate, unit, step);
-    const targetDayDistance = count * this.parsedOptions.timelineColWidth;
+    const targetDayDistance = this.getXByTime(date.getTime());
     const left = targetDayDistance - this.tableNoFrameWidth / 2;
     this.stateManager.setScrollLeft(left);
   }
@@ -1361,8 +1645,11 @@ export class Gantt extends EventTarget {
     this.stateManager.setScrollLeft(value);
   }
   /** 获取任务条的位置。相对应甘特图表左上角的位置。 */
-  getTaskBarRelativeRect(index: number) {
-    const taskBarNode = this.scenegraph.taskBar.getTaskBarNodeByIndex(index);
+  getTaskBarRelativeRect(index: number, sub_task_index?: number | number[]) {
+    const taskBarNode = this.scenegraph.taskBar.getTaskBarNodeByIndex(index, sub_task_index);
+    if (!taskBarNode) {
+      return null;
+    }
     const left =
       taskBarNode.attribute.x +
       this.taskListTableInstance.tableNoFrameWidth +
@@ -1404,9 +1691,22 @@ export class Gantt extends EventTarget {
   // }
 
   getDateColWidth(dateIndex: number) {
+    const widths = this._timelineColWidths;
+    if (widths?.length && dateIndex >= 0 && dateIndex < widths.length) {
+      return widths[dateIndex] ?? 0;
+    }
     return this.parsedOptions.timelineColWidth;
   }
   getDateColsWidth(startDateIndex: number, endDateIndex: number) {
+    const xPrefix = this._timelineColX;
+    if (xPrefix?.length) {
+      const start = Math.max(0, Math.min(startDateIndex, xPrefix.length - 1));
+      const end = Math.max(0, Math.min(endDateIndex + 1, xPrefix.length - 1));
+      if (end <= start) {
+        return 0;
+      }
+      return (xPrefix[end] ?? 0) - (xPrefix[start] ?? 0);
+    }
     return (endDateIndex - startDateIndex + 1) * this.parsedOptions.timelineColWidth;
   }
 
@@ -1448,6 +1748,22 @@ export class Gantt extends EventTarget {
     return style;
   }
 
+  getBaselineStyle(task_index: number, sub_task_index?: number | number[]) {
+    const { startDate, endDate, taskRecord } = this.getTaskInfoByTaskListIndex(task_index, sub_task_index);
+    const style = this.parsedOptions.baselineStyle;
+    if (typeof style === 'function') {
+      const args = {
+        index: task_index,
+        startDate,
+        endDate,
+        taskRecord,
+        ganttInstance: this
+      };
+      return style(args);
+    }
+    return style;
+  }
+
   /**
    * 格式化日期
    * @param date 日期对象或字符串
@@ -1455,7 +1771,7 @@ export class Gantt extends EventTarget {
    * @returns 格式化后的日期字符串
    */
   formatDate(date: Date | string, format: string) {
-    return formatDate(date, format);
+    return formatDate(date instanceof Date ? date : new Date(date), format);
   }
 
   // 查询当前的 millisecondsPerPixel 值

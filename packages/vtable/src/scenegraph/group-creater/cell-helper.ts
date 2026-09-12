@@ -24,6 +24,8 @@ import type { CreateProgressBarCell } from './cell-type/progress-bar-cell';
 import type { CreateSparkLineCellGroup } from './cell-type/spark-line-cell';
 import type { CreateTextCellGroup } from './cell-type/text-cell';
 import type { CreateVideoCellGroup } from './cell-type/video-cell';
+import type { CreateAudioCellGroup } from './cell-type/audio-cell';
+import { removeCellMediaChildren } from './cell-type/media-cell-helper';
 import type { BaseTableAPI, HeaderData, ListTableProtected } from '../../ts-types/base-table';
 import { getCellCornerRadius, getStyleTheme } from '../../core/tableHelper';
 import { getOrApply, isPromise } from '../../tools/helper';
@@ -41,10 +43,34 @@ import { onBeforeAttributeUpdateForInvertHighlight } from '../../plugins/invert-
 import { getCellBorderStrokeWidth } from '../utils/cell-border-stroke-width';
 import type { CreateSwitchCellGroup } from './cell-type/switch-cell';
 import type { CreateButtonCellGroup } from './cell-type/button-cell';
+import {
+  createCornerCustomMergeContainer,
+  isCornerCustomMergeRange,
+  shouldRenderCornerCustomMergeContent
+} from '../utils/corner-custom-merge';
+
+const PROMISE_CELL_UPDATE_TOKEN_KEY = '__vtable_promise_cell_update_token__';
+
+export function nextPromiseCellUpdateToken(cellGroup: Group): number {
+  const token = ((cellGroup as any)[PROMISE_CELL_UPDATE_TOKEN_KEY] ?? 0) + 1;
+  (cellGroup as any)[PROMISE_CELL_UPDATE_TOKEN_KEY] = token;
+  return token;
+}
+
+export function isPromiseCellUpdateCurrent(
+  table: BaseTableAPI,
+  col: number,
+  row: number,
+  cellGroup: Group,
+  token: number
+): boolean {
+  const currentCellGroup = table.scenegraph.highPerformanceGetCell(col, row, true);
+  return currentCellGroup === cellGroup && (cellGroup as any)[PROMISE_CELL_UPDATE_TOKEN_KEY] === token;
+}
 
 export function createCell(
   type: ColumnTypeOption,
-  value: string,
+  value: any,
   define: ColumnDefine,
   table: BaseTableAPI,
   col: number,
@@ -63,18 +89,24 @@ export function createCell(
   customResult?: {
     elementsGroup?: VGroup;
     renderDefault: boolean;
-  }
+  },
+  cellValue?: any
 ): Group {
   let isAsync = false;
   let cellGroup: Group;
+  const hasCellValue = arguments.length >= 19;
+  let renderValue = hasCellValue ? cellValue : value;
   if (isPromise(value)) {
     if (table.scenegraph.highPerformanceGetCell(col, row).role !== 'cell') {
       // avoid nouse async create cell
       return cellGroup;
     }
-    value = table.getCellValue(col, row);
+    if (!hasCellValue) {
+      renderValue = table.getCellValue(col, row);
+    }
     isAsync = true;
   }
+  value = renderValue;
   // let bgColorFunc: Function;
   // // 判断是否有mapping  遍历dataset中mappingRules
   // if ((table.internalProps as PivotTableProtected)?.dataConfig?.mappingRules && !table.isHeader(col, row)) {
@@ -113,7 +145,8 @@ export function createCell(
       define as CheckboxColumnDefine,
       range,
       isAsync,
-      true
+      true,
+      value
     );
   } else if (type === 'text' || type === 'link' || customResult) {
     // customMerge&customLayout cell as text cell
@@ -249,7 +282,28 @@ export function createCell(
       table,
       cellTheme,
       range,
-      isAsync
+      isAsync,
+      value
+    );
+  } else if (type === 'audio') {
+    const createAudioCellGroup = Factory.getFunction('createAudioCellGroup') as CreateAudioCellGroup;
+    cellGroup = createAudioCellGroup(
+      columnGroup,
+      0,
+      y,
+      col,
+      row,
+      cellWidth,
+      cellHeight,
+      padding,
+      textAlign,
+      textBaseline,
+      mayHaveIcon,
+      table,
+      cellTheme,
+      range,
+      isAsync,
+      value
     );
   } else if (type === 'video') {
     // 创建视频单元格
@@ -271,7 +325,8 @@ export function createCell(
       table,
       cellTheme,
       range,
-      isAsync
+      isAsync,
+      value
     );
   } else if (type === 'chart') {
     const chartInstance = table.internalProps.layoutMap.getChartInstance(col, row);
@@ -369,13 +424,13 @@ export function createCell(
       padding,
       table,
       cellTheme,
-      isAsync
+      isAsync,
+      value
     );
   } else if (type === 'checkbox') {
     const isAggregation =
       'isAggregation' in table.internalProps.layoutMap && table.internalProps.layoutMap.isAggregation(col, row);
-    const isSeriesNumber = table.internalProps.layoutMap.isSeriesNumber(col, row);
-    if (isAggregation && isSeriesNumber) {
+    if (isAggregation) {
       const createTextCellGroup = Factory.getFunction('createTextCellGroup') as CreateTextCellGroup;
       cellGroup = createTextCellGroup(
         table,
@@ -419,29 +474,59 @@ export function createCell(
         define as CheckboxColumnDefine,
         range,
         isAsync,
-        false
+        false,
+        value
       );
     }
   } else if (type === 'radio') {
-    const createRadioCellGroup = Factory.getFunction('createRadioCellGroup') as CreateRadioCellGroup;
-    cellGroup = createRadioCellGroup(
-      null,
-      columnGroup,
-      0,
-      y,
-      col,
-      row,
-      colWidth,
-      cellWidth,
-      cellHeight,
-      padding,
-      textAlign,
-      textBaseline,
-      table,
-      cellTheme,
-      define as RadioColumnDefine,
-      range
-    );
+    const isAggregation =
+      'isAggregation' in table.internalProps.layoutMap && table.internalProps.layoutMap.isAggregation(col, row);
+    if (isAggregation) {
+      const createTextCellGroup = Factory.getFunction('createTextCellGroup') as CreateTextCellGroup;
+      cellGroup = createTextCellGroup(
+        table,
+        value,
+        columnGroup,
+        0,
+        y,
+        col,
+        row,
+        colWidth,
+        cellWidth,
+        cellHeight,
+        padding,
+        textAlign,
+        textBaseline,
+        false,
+        undefined,
+        true,
+        cellTheme,
+        range,
+        isAsync
+      );
+    } else {
+      const createRadioCellGroup = Factory.getFunction('createRadioCellGroup') as CreateRadioCellGroup;
+      cellGroup = createRadioCellGroup(
+        null,
+        columnGroup,
+        0,
+        y,
+        col,
+        row,
+        colWidth,
+        cellWidth,
+        cellHeight,
+        padding,
+        textAlign,
+        textBaseline,
+        table,
+        cellTheme,
+        define as RadioColumnDefine,
+        range,
+        isAsync,
+        value
+      );
+    }
   } else if (type === 'switch') {
     const createSwitchCellGroup = Factory.getFunction('createSwitchCellGroup') as CreateSwitchCellGroup;
     cellGroup = createSwitchCellGroup(
@@ -462,7 +547,8 @@ export function createCell(
       cellTheme,
       define as SwitchColumnDefine,
       range,
-      isAsync
+      isAsync,
+      value
     );
   } else if (type === 'button') {
     const createButtonCellGroup = Factory.getFunction('createButtonCellGroup') as CreateButtonCellGroup;
@@ -484,7 +570,8 @@ export function createCell(
       cellTheme,
       define as ButtonColumnDefine,
       range,
-      isAsync
+      isAsync,
+      value
     );
   }
 
@@ -508,9 +595,23 @@ function _generateCustomElementsGroup(
 ) {
   let customElementsGroup;
   let renderDefault = true;
+  const shouldRenderContent = shouldRenderCornerCustomMergeContent(col, row, range, table);
+  if (!shouldRenderContent) {
+    return {
+      customElementsGroup,
+      renderDefault: false
+    };
+  }
+
   if (customResult) {
     // custom merge custom render
-    customElementsGroup = customResult.elementsGroup;
+    customElementsGroup = createCornerCustomMergeContainer(
+      customResult.elementsGroup,
+      cellWidth,
+      cellHeight,
+      range,
+      table
+    );
     renderDefault = customResult.renderDefault;
   } else if (range?.isCustom && !table.isCornerHeader(col, row)) {
     // 判断不是角头单元格，来兼容corner中设置的customLayout
@@ -528,11 +629,13 @@ function _generateCustomElementsGroup(
       customLayout = define?.customLayout;
     }
     if (customLayout || customRender) {
+      const customCol = range && isCornerCustomMergeRange(range, table) ? range.start.col : col;
+      const customRow = range && isCornerCustomMergeRange(range, table) ? range.start.row : row;
       const customResult = dealWithCustom(
         customLayout,
         customRender,
-        col,
-        row,
+        customCol,
+        customRow,
         cellWidth,
         cellHeight,
         false,
@@ -541,7 +644,13 @@ function _generateCustomElementsGroup(
         range,
         table
       );
-      customElementsGroup = customResult.elementsGroup;
+      customElementsGroup = createCornerCustomMergeContainer(
+        customResult.elementsGroup,
+        cellWidth,
+        cellHeight,
+        range,
+        table
+      );
       renderDefault = customResult.renderDefault;
     }
   }
@@ -562,7 +671,7 @@ export function updateCell(
   // const oldCellGroup = table.scenegraph.getCell(col, row, true);
   const oldCellGroup = table.scenegraph.highPerformanceGetCell(col, row, true);
 
-  if (oldCellGroup.role !== 'cell' && !addNew) {
+  if (oldCellGroup.role !== 'cell' && oldCellGroup.role !== 'shadow-cell' && !addNew) {
     return undefined;
   }
 
@@ -593,7 +702,7 @@ export function updateCell(
       //   cellTheme.group.cornerRadius = getCellCornerRadius(col, row, table);
       // }
 
-      if (customLayout || customRender) {
+      if ((customLayout || customRender) && shouldRenderCornerCustomMergeContent(col, row, customMergeRange, table)) {
         customResult = dealWithCustom(
           customLayout,
           customRender,
@@ -640,12 +749,12 @@ export function updateCell(
     isMerge = range.start.col !== range.end.col || range.start.row !== range.end.row;
   }
   let isVtableMerge = false;
-  if (table.internalProps.enableTreeNodeMerge && isMerge) {
+  if (table.internalProps.enableTreeNodeMerge && range) {
     const rawRecord = table.getCellRawRecord(range.start.col, range.start.row);
     const { vtableMergeName, vtableMerge } = rawRecord ?? {};
 
-    isVtableMerge = vtableMerge;
-    if (vtableMerge) {
+    isVtableMerge = vtableMerge && (isMerge || !table.isSeriesNumberInBody(col, row));
+    if (isVtableMerge) {
       mayHaveIcon = true;
       if ((table.internalProps as ListTableProtected).groupTitleCustomLayout) {
         customResult = dealWithCustom(
@@ -686,6 +795,7 @@ export function updateCell(
   if (
     !addNew &&
     !isMerge &&
+    !isVtableMerge &&
     !(define?.customLayout || define?.customRender || define?.headerCustomLayout || define?.headerCustomRender) &&
     (forceFastUpdate || canUseFastUpdate(col, row, oldCellGroup, autoWrapText, mayHaveIcon, table))
   ) {
@@ -790,12 +900,7 @@ export function updateCell(
     return undefined;
   }
 
-  const type =
-    isVtableMerge || isCustomMerge
-      ? 'text'
-      : table.isHeader(col, row)
-      ? (table._getHeaderLayoutMap(col, row) as HeaderData).headerType ?? 'text'
-      : table.getBodyColumnType(col, row) ?? 'text';
+  const type = isVtableMerge || isCustomMerge ? 'text' : table.getCellType(col, row);
 
   const padding = cellTheme._vtable.padding;
   const textAlign = cellTheme.text.textAlign;
@@ -830,7 +935,9 @@ export function updateCell(
 
   // deal with promise data
   if (isPromise(value)) {
+    const updateToken = nextPromiseCellUpdateToken(oldCellGroup);
     // clear cell content sync
+    removeCellMediaChildren(oldCellGroup);
     oldCellGroup.removeAllChild();
 
     // update cell content async
@@ -839,7 +946,6 @@ export function updateCell(
       table,
       callUpdateCellContentForPromiseValue.bind(null, {
         type,
-        value,
         define,
         table,
         col,
@@ -855,7 +961,9 @@ export function updateCell(
         addNew,
         range,
         customResult,
-        customStyle
+        customStyle,
+        promiseValue: value,
+        updateToken
       })
     );
   } else {
@@ -911,7 +1019,7 @@ export function updateCell(
 
 function updateCellContent(
   type: ColumnTypeOption,
-  value: string,
+  value: any,
   define: ColumnDefine,
   table: BaseTableAPI,
   col: number,
@@ -930,11 +1038,10 @@ function updateCellContent(
   customResult?: {
     elementsGroup?: VGroup;
     renderDefault: boolean;
-  }
+  },
+  cellValue?: any
 ) {
-  if (isPromise(value)) {
-    value = table.getCellValue(col, row);
-  }
+  const hasCellValue = arguments.length >= 18;
   //解决报错 getCellByCache递归调用 死循环问题
   if (!addNew && (oldCellGroup.row !== row || oldCellGroup.col !== col)) {
     return null;
@@ -951,7 +1058,7 @@ function updateCellContent(
       }
     }
   }
-  const newCellGroup = createCell(
+  const createCellArgs: Parameters<typeof createCell> = [
     type,
     value,
     define,
@@ -972,11 +1079,16 @@ function updateCellContent(
     cellTheme,
     range,
     customResult
-  );
-  if (!addNew && oldCellGroup.parent) {
+  ];
+  if (hasCellValue) {
+    createCellArgs.push(cellValue);
+  }
+  const newCellGroup = createCell(...createCellArgs);
+  if (!addNew && oldCellGroup.parent && newCellGroup !== oldCellGroup) {
     // update cell
     oldCellGroup.parent.insertAfter(newCellGroup, oldCellGroup);
     oldCellGroup.parent.removeChild(oldCellGroup);
+    removeCellMediaChildren(oldCellGroup);
     oldCellGroup.release(true);
 
     // update cache
@@ -1016,10 +1128,9 @@ function canUseFastUpdate(
   }
   return false;
 }
-function callUpdateCellContentForPromiseValue(updateCellArgs: any) {
+function callUpdateCellContentForPromiseValue(updateCellArgs: any, resolvedValue: any) {
   const {
     type,
-    value,
     define,
     table,
     col,
@@ -1034,8 +1145,13 @@ function callUpdateCellContentForPromiseValue(updateCellArgs: any) {
     addNew,
     range,
     customResult,
-    customStyle
+    customStyle,
+    promiseValue,
+    updateToken
   } = updateCellArgs;
+  if (!isPromiseCellUpdateCurrent(table, col, row, oldCellGroup, updateToken)) {
+    return;
+  }
   const cellStyle = customStyle || table._getCellStyle(range ? range.start.col : col, range ? range.start.row : row);
   const cellTheme = getStyleTheme(
     cellStyle,
@@ -1048,7 +1164,7 @@ function callUpdateCellContentForPromiseValue(updateCellArgs: any) {
   cellTheme.group.cornerRadius = getCellCornerRadius(col, row, table);
   updateCellContent(
     type,
-    value,
+    promiseValue,
     define,
     table,
     col,
@@ -1064,7 +1180,8 @@ function callUpdateCellContentForPromiseValue(updateCellArgs: any) {
     addNew,
     cellTheme,
     range,
-    customResult
+    customResult,
+    resolvedValue
   );
 }
 export function dealWithMergeCellSize(
@@ -1274,6 +1391,24 @@ export function getCustomCellMergeCustom(col: number, row: number, cellGroup: Gr
       } = customMerge;
 
       if (customMergeLayout || customMergeRender) {
+        const rangeHeight = table.getRowHeight(row);
+        const rangeWidth = table.getColWidth(col);
+        const contentWidth = table.getColsWidth(customMergeRange.start.col, customMergeRange.end.col);
+        const contentHeight = table.getRowsHeight(customMergeRange.start.row, customMergeRange.end.row);
+
+        cellGroup.contentWidth = contentWidth;
+        cellGroup.contentHeight = contentHeight;
+
+        if (!shouldRenderCornerCustomMergeContent(col, row, customMergeRange, table)) {
+          const customContainer = cellGroup.getChildByName(CUSTOM_CONTAINER_NAME);
+          if (customContainer) {
+            cellGroup.removeChild(customContainer);
+          }
+          cellGroup.setAttribute('clip', true);
+          resizeCellGroup(cellGroup, rangeWidth, rangeHeight, customMergeRange, table);
+          return customMergeRange;
+        }
+
         const customResult = dealWithCustom(
           customMergeLayout,
           customMergeRender,
@@ -1288,7 +1423,13 @@ export function getCustomCellMergeCustom(col: number, row: number, cellGroup: Gr
           table
         );
 
-        const customElementsGroup = customResult.elementsGroup;
+        const customElementsGroup = createCornerCustomMergeContainer(
+          customResult.elementsGroup,
+          contentWidth,
+          contentHeight,
+          customMergeRange,
+          table
+        );
 
         if (cellGroup.childrenCount > 0 && customElementsGroup) {
           cellGroup.insertBefore(customElementsGroup, cellGroup.firstChild);
@@ -1296,15 +1437,10 @@ export function getCustomCellMergeCustom(col: number, row: number, cellGroup: Gr
           cellGroup.appendChild(customElementsGroup);
         }
 
-        const rangeHeight = table.getRowHeight(row);
-        const rangeWidth = table.getColWidth(col);
-
-        const { width: contentWidth } = cellGroup.attribute;
-        const { height: contentHeight } = cellGroup.attribute;
-        cellGroup.contentWidth = contentWidth;
-        cellGroup.contentHeight = contentHeight;
-
         resizeCellGroup(cellGroup, rangeWidth, rangeHeight, customMergeRange, table);
+        if (isCornerCustomMergeRange(customMergeRange, table)) {
+          cellGroup.setAttribute('clip', false);
+        }
 
         return customMergeRange;
       }

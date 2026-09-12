@@ -1,7 +1,9 @@
 import type { ListTable, BaseTableAPI, TYPES, pluginsDefinition } from '@visactor/vtable';
 import { TABLE_EVENT_TYPE } from '@visactor/vtable';
-import type { TableEvents } from '@visactor/vtable/src/core/TABLE_EVENT_TYPE';
+// 从 TABLE_EVENT_TYPE 常量对象推导出事件值的联合类型，避免依赖 vtable 内部类型路径。
+type TableEventType = typeof TABLE_EVENT_TYPE[keyof typeof TABLE_EVENT_TYPE];
 import type { EventArg } from './types';
+import type { IEditor } from '@visactor/vtable-editors';
 export enum ExcelEditCellKeyboardResponse {
   ENTER = 'enter',
   TAB = 'tab',
@@ -19,6 +21,8 @@ export type IExcelEditCellKeyboardPluginOptions = {
   responseKeyboard?: ExcelEditCellKeyboardResponse[];
   /** 删除能力是否只应用到可编辑单元格 */
   deleteWorkOnEditableCell?: boolean;
+  /** 删除范围时通过 changeCellValuesByRanges 批量更新，从而聚合成一次 change_cell_values 事件 */
+  batchCallChangeCellValuesApi?: boolean;
   // keyDown_before?: (event: KeyboardEvent) => void;
   // keyDown_after?: (event: KeyboardEvent) => void;
 };
@@ -30,6 +34,7 @@ export class ExcelEditCellKeyboardPlugin implements pluginsDefinition.IVTablePlu
   table: ListTable;
   pluginOptions: IExcelEditCellKeyboardPluginOptions;
   responseKeyboard: ExcelEditCellKeyboardResponse[];
+  batchCallChangeCellValuesApi: boolean;
   constructor(pluginOptions?: IExcelEditCellKeyboardPluginOptions) {
     this.id = pluginOptions?.id ?? this.id;
     this.pluginOptions = pluginOptions;
@@ -44,9 +49,11 @@ export class ExcelEditCellKeyboardPlugin implements pluginsDefinition.IVTablePlu
       ExcelEditCellKeyboardResponse.BACKSPACE
     ];
 
+    this.batchCallChangeCellValuesApi = pluginOptions?.batchCallChangeCellValuesApi ?? false;
+
     this.bindEvent();
   }
-  run(...args: [EventArg, TableEvents[keyof TableEvents] | TableEvents[keyof TableEvents][], BaseTableAPI]) {
+  run(...args: [EventArg, TableEventType | TableEventType[], BaseTableAPI]) {
     const table: BaseTableAPI = args[2];
     this.table = table as ListTable;
   }
@@ -123,9 +130,21 @@ export class ExcelEditCellKeyboardPlugin implements pluginsDefinition.IVTablePlu
         ) {
           //响应删除键，删除
           const selectCells = this.table.getSelectedCellInfos();
-          if (selectCells?.length > 0 && document.activeElement === this.table.getElement()) {
+          if (
+            selectCells?.length > 0 &&
+            (document.activeElement === this.table.getElement() ||
+              Object.values(this.table.editorManager.cacheLastSelectedCellEditor || {}).some(
+                // 处理情况：没有开始编辑但编辑器及编辑输入框已经存在的情况下（editCellTrigger为keydown）判断当前激活的是cacheLastSelectedCellEditor中的input也应该响应删除单元格
+                (editor: IEditor) => editor.getInputElement?.() === document.activeElement
+              ))
+          ) {
             // 如果选中的是范围，则删除范围内的所有单元格
-            deleteSelectRange(selectCells, this.table, this.pluginOptions?.deleteWorkOnEditableCell ?? true);
+            deleteSelectRange(
+              selectCells,
+              this.table,
+              this.pluginOptions?.deleteWorkOnEditableCell ?? true,
+              this.batchCallChangeCellValuesApi
+            );
             // 阻止事件传播和默认行为
             event.stopPropagation();
             event.preventDefault();
@@ -156,8 +175,17 @@ export class ExcelEditCellKeyboardPlugin implements pluginsDefinition.IVTablePlu
 function deleteSelectRange(
   selectCells: TYPES.CellInfo[][],
   tableInstance: ListTable,
-  workOnEditableCell: boolean = false
+  workOnEditableCell: boolean = false,
+  batchCallChangeCellValuesApi: boolean = false
 ) {
+  if (batchCallChangeCellValuesApi) {
+    const ranges = tableInstance.stateManager.select.ranges;
+    if (ranges?.length) {
+      tableInstance.changeCellValuesByRanges(ranges, '', workOnEditableCell, true);
+    }
+    return;
+  }
+
   for (let i = 0; i < selectCells.length; i++) {
     for (let j = 0; j < selectCells[i].length; j++) {
       tableInstance.changeCellValue(selectCells[i][j].col, selectCells[i][j].row, '', workOnEditableCell);

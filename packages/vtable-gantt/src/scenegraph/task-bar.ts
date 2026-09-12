@@ -1,7 +1,7 @@
 import { Group, createText, createRect, Image, Circle, Line, Polygon } from '@visactor/vtable/es/vrender';
 import type { Scenegraph } from './scenegraph';
 // import { Icon } from './icon';
-import { computeCountToTimeScale, parseStringTemplate, toBoxArray } from '../tools/util';
+import { parseStringTemplate, toBoxArray } from '../tools/util';
 import { isValid } from '@visactor/vutils';
 import { defaultTaskBarStyle, getTextPos } from '../gantt-helper';
 import { GanttTaskBarNode } from './gantt-node';
@@ -12,6 +12,29 @@ const TASKBAR_HOVER_ICON = `<svg width="100" height="200" xmlns="http://www.w3.o
   <line x1="70" y1="10" x2="70" y2="190" stroke="black" stroke-width="4"/>
 </svg>`;
 export const TASKBAR_HOVER_ICON_WIDTH = 10;
+const LOCATE_ICON_SIZE = 22;
+const LOCATE_ICON_PADDING = 4;
+const LOCATE_ICON_BG = '#f2f3f5';
+const LOCATE_ICON_BG_HOVER = '#4080ff';
+const LOCATE_ICON_ARROW = '#4e5969';
+const LOCATE_ICON_ARROW_HOVER = '#ffffff';
+
+const isSameSubTaskIndex = (source?: number | number[], target?: number | number[]) => {
+  if (!isValid(target)) {
+    return true;
+  }
+
+  if (Array.isArray(source) || Array.isArray(target)) {
+    return (
+      Array.isArray(source) &&
+      Array.isArray(target) &&
+      source.length === target.length &&
+      source.every((value, index) => value === target[index])
+    );
+  }
+
+  return source === target;
+};
 
 export class TaskBar {
   formatMilestoneText(text: string, record: any): string {
@@ -98,6 +121,8 @@ export class TaskBar {
   hoverBarLeftIcon: Image;
   hoverBarRightIcon: Image;
   hoverBarProgressHandle: Group;
+  locateIconsGroup?: Group;
+  currentHoverLocateIcon: Group | null;
   _scene: Scenegraph;
   width: number;
   height: number;
@@ -119,6 +144,10 @@ export class TaskBar {
     scene.ganttGroup.addChild(this.group);
     this.initBars();
     this.initHoverBarIcons();
+    if (scene._gantt.parsedOptions.taskBarLocateIcon) {
+      // 定位图标层：用于提示“任务条在当前可视区外”，并支持一键滚动定位
+      this.initLocateIconsGroup();
+    }
   }
 
   initBars() {
@@ -142,15 +171,21 @@ export class TaskBar {
         const record = this._scene._gantt.getRecordByIndex(i);
         if (record.children?.length > 0) {
           for (let j = 0; j < record.children?.length; j++) {
-            const barGroup = this.initBar(i, j, record.children.length);
-            if (barGroup) {
-              this.barContainer.appendChild(barGroup);
+            const { barGroupBox, baselineBar } = this.initBar(i, j, record.children.length);
+            if (baselineBar) {
+              this.barContainer.appendChild(baselineBar);
+            }
+            if (barGroupBox) {
+              this.barContainer.appendChild(barGroupBox);
             }
           }
         } else {
-          const barGroup = this.initBar(i);
-          if (barGroup) {
-            this.barContainer.appendChild(barGroup);
+          const { barGroupBox, baselineBar } = this.initBar(i);
+          if (baselineBar) {
+            this.barContainer.appendChild(baselineBar);
+          }
+          if (barGroupBox) {
+            this.barContainer.appendChild(barGroupBox);
           }
         }
         continue;
@@ -167,9 +202,12 @@ export class TaskBar {
               for (let j = 0; j < record.children?.length; j++) {
                 const child_record = record.children[j];
                 if (child_record.type !== TaskType.PROJECT) {
-                  const barGroup = this.initBar(i, [...sub_task_indexs, j], record.children.length);
-                  if (barGroup) {
-                    this.barContainer.appendChild(barGroup);
+                  const { barGroupBox, baselineBar } = this.initBar(i, [...sub_task_indexs, j], record.children.length);
+                  if (baselineBar) {
+                    this.barContainer.appendChild(baselineBar);
+                  }
+                  if (barGroupBox) {
+                    this.barContainer.appendChild(barGroupBox);
                   }
                 } else {
                   //如果是project类型的子任务，需要递归调用 只将类型不是project的子任务添加到barContainer中
@@ -181,16 +219,22 @@ export class TaskBar {
           callInitBar(record, sub_task_indexs);
         } else {
           // For non-project tasks, use the default Tasks_Separate mode
-          const barGroup = this.initBar(i);
-          if (barGroup) {
-            this.barContainer.appendChild(barGroup);
+          const { barGroupBox, baselineBar } = this.initBar(i);
+          if (baselineBar) {
+            this.barContainer.appendChild(baselineBar);
+          }
+          if (barGroupBox) {
+            this.barContainer.appendChild(barGroupBox);
           }
         }
         continue;
       } else {
-        const barGroup = this.initBar(i);
-        if (barGroup) {
-          this.barContainer.appendChild(barGroup);
+        const { barGroupBox, baselineBar } = this.initBar(i);
+        if (baselineBar) {
+          this.barContainer.appendChild(baselineBar);
+        }
+        if (barGroupBox) {
+          this.barContainer.appendChild(barGroupBox);
         }
       }
     }
@@ -212,47 +256,120 @@ export class TaskBar {
       (isMilestone && !startDate) ||
       (!isMilestone && (taskDays <= 0 || !startDate || !endDate || startDate.getTime() > endDate.getTime()))
     ) {
-      return null;
+      return { barGroupBox: null, baselineBar: null };
     }
-    const { unit, step } = this._scene._gantt.parsedOptions.reverseSortedTimelineScales[0];
     let taskBarSize =
-      computeCountToTimeScale(endDate, startDate, unit, step, 1) * this._scene._gantt.parsedOptions.timelineColWidth;
+      this._scene._gantt.getXByTime(endDate.getTime() + 1) - this._scene._gantt.getXByTime(startDate.getTime());
 
     const taskBarStyle = this._scene._gantt.getTaskBarStyle(index, childIndex);
     const taskbarHeight = taskBarStyle.width;
     if (isValid(taskBarStyle.minSize)) {
       taskBarSize = Math.max(taskBarSize, taskBarStyle.minSize);
     }
-    // const minDate = createDateAtMidnight(this._scene._gantt.parsedOptions.minDate);
 
-    // const subTaskShowRowCount =
-    //   this._scene._gantt.parsedOptions.tasksShowMode === TasksShowMode.Sub_Tasks_Separate
-    //     ? childrenLength || 1
-    //     : this._scene._gantt.parsedOptions.tasksShowMode === TasksShowMode.Sub_Tasks_Arrange
-    //     ? computeRowsCountByRecordDate(this._scene._gantt, this._scene._gantt.records[index])
-    //     : this._scene._gantt.parsedOptions.tasksShowMode === TasksShowMode.Sub_Tasks_Compact
-    //     ? computeRowsCountByRecordDateForCompact(this._scene._gantt, this._scene._gantt.records[index])
-    //     : 1;
-    const oneTaskHeigth = this._scene._gantt.parsedOptions.rowHeight; // this._scene._gantt.getRowHeightByIndex(index) / subTaskShowRowCount;
+    const oneTaskHeigth = this._scene._gantt.parsedOptions.rowHeight;
     const milestoneTaskBarHeight = this._scene._gantt.parsedOptions.taskBarMilestoneStyle.width;
-    const x =
-      computeCountToTimeScale(startDate, this._scene._gantt.parsedOptions.minDate, unit, step) *
-        this._scene._gantt.parsedOptions.timelineColWidth -
-      (isMilestone ? milestoneTaskBarHeight / 2 : 0);
-    const y =
+    const x = this._scene._gantt.getXByTime(startDate.getTime()) - (isMilestone ? milestoneTaskBarHeight / 2 : 0);
+    let y =
       this._scene._gantt.getRowsHeightByIndex(0, index - 1) +
       (this._scene._gantt.parsedOptions.tasksShowMode === TasksShowMode.Sub_Tasks_Separate
         ? ((childIndex as number) ?? 0) * oneTaskHeigth
         : this._scene._gantt.parsedOptions.tasksShowMode === TasksShowMode.Sub_Tasks_Arrange ||
           this._scene._gantt.parsedOptions.tasksShowMode === TasksShowMode.Sub_Tasks_Compact
         ? taskRecord.vtable_gantt_showIndex * oneTaskHeigth
-        : 0) +
-      (oneTaskHeigth - (isMilestone ? milestoneTaskBarHeight : taskbarHeight)) / 2;
+        : 0);
+
+    const baselineInfo = this._scene._gantt.getBaselineInfoByTaskListIndex(index, childIndex);
+    const hasBaseline = baselineInfo.baselineStartDate && baselineInfo.baselineEndDate && baselineInfo.baselineDays > 0;
+    const baselinePosition = this._scene._gantt.parsedOptions.baselinePosition;
+
+    let baselineBar: any = null;
+    let taskBarYOffset = 0;
+
+    if (hasBaseline && !isMilestone) {
+      const baselineStyle = this._scene._gantt.getBaselineStyle(index, childIndex);
+      const baselineX = this._scene._gantt.getXByTime(baselineInfo.baselineStartDate.getTime());
+      const baselineWidth =
+        this._scene._gantt.getXByTime(baselineInfo.baselineEndDate.getTime() + 1) -
+        this._scene._gantt.getXByTime(baselineInfo.baselineStartDate.getTime());
+
+      let baselineY: number;
+      const taskBarPaddingTop = taskBarStyle.paddingTop ?? undefined;
+      const baselinePaddingTop = baselineStyle.paddingTop ?? undefined;
+
+      if (baselinePosition === 'overlap') {
+        if (taskBarPaddingTop !== undefined) {
+          baselineY = y + taskBarPaddingTop;
+        } else {
+          baselineY = y + (oneTaskHeigth - baselineStyle.width) / 2;
+        }
+      } else if (baselinePosition === 'top') {
+        const gap = 4;
+        if (baselinePaddingTop !== undefined && taskBarPaddingTop !== undefined) {
+          baselineY = y + baselinePaddingTop;
+          taskBarYOffset = taskBarPaddingTop;
+        } else if (baselinePaddingTop !== undefined) {
+          baselineY = y + baselinePaddingTop;
+          taskBarYOffset = baselinePaddingTop + baselineStyle.width + gap;
+        } else if (taskBarPaddingTop !== undefined) {
+          const totalHeight = baselineStyle.width + gap + taskbarHeight;
+          const startY = (oneTaskHeigth - totalHeight) / 2;
+          baselineY = y + startY;
+          taskBarYOffset = taskBarPaddingTop;
+        } else {
+          const totalHeight = baselineStyle.width + gap + taskbarHeight;
+          const startY = (oneTaskHeigth - totalHeight) / 2;
+          baselineY = y + startY;
+          taskBarYOffset = startY + baselineStyle.width + gap;
+        }
+      } else {
+        const gap = 4;
+        if (taskBarPaddingTop !== undefined && baselinePaddingTop !== undefined) {
+          taskBarYOffset = taskBarPaddingTop;
+          baselineY = y + baselinePaddingTop;
+        } else if (taskBarPaddingTop !== undefined) {
+          taskBarYOffset = taskBarPaddingTop;
+          baselineY = y + taskBarPaddingTop + taskbarHeight + gap;
+        } else if (baselinePaddingTop !== undefined) {
+          const totalHeight = taskbarHeight + gap + baselineStyle.width;
+          const startY = (oneTaskHeigth - totalHeight) / 2;
+          taskBarYOffset = startY;
+          baselineY = y + baselinePaddingTop;
+        } else {
+          const totalHeight = taskbarHeight + gap + baselineStyle.width;
+          const startY = (oneTaskHeigth - totalHeight) / 2;
+          taskBarYOffset = startY;
+          baselineY = y + startY + taskbarHeight + gap;
+        }
+      }
+
+      baselineBar = createRect({
+        x: baselineX,
+        y: baselineY,
+        width: Math.max(baselineWidth, baselineStyle.minSize || 0),
+        height: baselineStyle.width,
+        fill: baselineStyle.barColor,
+        cornerRadius: baselineStyle.cornerRadius,
+        lineWidth: (baselineStyle.borderLineWidth ?? baselineStyle.borderWidth) * 2,
+        stroke: baselineStyle.borderColor,
+        pickable: false
+      });
+      baselineBar.name = 'baseline-bar';
+    }
+
+    const taskBarPaddingTop = taskBarStyle.paddingTop ?? undefined;
+    if (hasBaseline && !isMilestone && baselinePosition !== 'overlap') {
+      y = y + taskBarYOffset;
+    } else if (taskBarPaddingTop !== undefined) {
+      y = y + taskBarPaddingTop;
+    } else {
+      y += (oneTaskHeigth - (isMilestone ? milestoneTaskBarHeight : taskbarHeight)) / 2 + taskBarYOffset;
+    }
+
     const barGroupBox = new GanttTaskBarNode({
       x,
       y,
       width: isMilestone ? milestoneTaskBarHeight : taskBarSize,
-      // height: this._scene._gantt.parsedOptions.rowHeight,
       height: isMilestone ? milestoneTaskBarHeight : taskbarHeight,
       cornerRadius: isMilestone
         ? this._scene._gantt.parsedOptions.taskBarMilestoneStyle.cornerRadius
@@ -265,13 +382,10 @@ export class TaskBar {
         : taskBarStyle.borderColor,
       angle: isMilestone ? (45 / 180) * Math.PI : 0,
       anchor: isMilestone ? [x + milestoneTaskBarHeight / 2, y + milestoneTaskBarHeight / 2] : undefined
-      // clip: true
     });
     barGroupBox.name = 'task-bar';
-    //如果TaskShowMode是tasks_separate模式 这里的task_index其实是table中的bodyIndex；如果TaskShowMode是sub_tasks_***模式 task_index也是对应父节点任务条在table中的bodyIndex（但不会渲染父节点，只是渲染子节点）
     barGroupBox.task_index = index;
-    //如果TaskShowMode是tasks_separate模式，不会赋值sub_task_index；如果TaskShowMode是sub_tasks_***模式 这里的sub_task_index是父节点下子元素的index
-    barGroupBox.sub_task_index = childIndex;
+    barGroupBox.sub_task_index = childIndex as any;
     barGroupBox.record = taskRecord;
 
     const barGroup = new Group({
@@ -310,9 +424,6 @@ export class TaskBar {
         customLayoutObj = taskBarCustomLayout;
       }
       if (customLayoutObj) {
-        // if (customLayoutObj.rootContainer) {
-        //   customLayoutObj.rootContainer = decodeReactDom(customLayoutObj.rootContainer);
-        // }
         rootContainer = customLayoutObj.rootContainer;
         renderDefaultBar = customLayoutObj.renderDefaultBar ?? false;
         renderDefaultText = customLayoutObj.renderDefaultText ?? false;
@@ -321,10 +432,9 @@ export class TaskBar {
     }
 
     if (renderDefaultBar) {
-      // 创建整个任务条rect
       const rect = createRect({
         x: 0,
-        y: 0, //this._scene._gantt.parsedOptions.rowHeight - taskbarHeight) / 2,
+        y: 0,
         width: barGroupBox.attribute.width,
         height: barGroupBox.attribute.height,
         fill: isMilestone ? this._scene._gantt.parsedOptions.taskBarMilestoneStyle.fillColor : taskBarStyle.barColor,
@@ -334,10 +444,9 @@ export class TaskBar {
       barGroup.appendChild(rect);
       barGroupBox.barRect = rect;
       if (taskRecord.type !== TaskType.MILESTONE) {
-        // 创建已完成部分任务条rect
         const progress_rect = createRect({
           x: 0,
-          y: 0, //(this._scene._gantt.parsedOptions.rowHeight - taskbarHeight) / 2,
+          y: 0,
           width: (taskBarSize * progress) / 100,
           height: taskbarHeight,
           fill: taskBarStyle.completedBarColor,
@@ -381,7 +490,7 @@ export class TaskBar {
         }
         // dx: 12 + 4,
         // dy: this._scene._gantt.barLabelStyle.fontSize / 2
-      });
+      } as any);
 
       barGroup.appendChild(label);
       barGroupBox.textLabel = label;
@@ -418,7 +527,7 @@ export class TaskBar {
         fontSize: textStyle.fontSize || 16,
         fontFamily: textStyle.fontFamily || 'Arial',
         fill: textStyle.color || '#ff0000',
-        textBaseline: textStyle.textBaseline || pos.textBaselineValue,
+        textBaseline: (textStyle.textBaseline || pos.textBaselineValue) as any,
         textAlign: textStyle.textAlign || pos.textAlignValue,
         text: this.formatMilestoneText(milestoneStyle.labelText, taskRecord),
         pickable: false
@@ -430,18 +539,22 @@ export class TaskBar {
       barGroupBox.milestoneTextLabel = milestoneLabel;
       barGroupBox.milestoneTextContainer = textContainer;
     }
-    return barGroupBox;
+    return { barGroupBox, baselineBar };
   }
-  updateTaskBarNode(index: number, sub_task_index?: number) {
+  updateTaskBarNode(index: number, sub_task_index?: number | number[]) {
     const taskbarGroup = this.getTaskBarNodeByIndex(index, sub_task_index);
     if (taskbarGroup) {
       this.barContainer.removeChild(taskbarGroup);
     }
-    const barGroup = this.initBar(index, sub_task_index);
-    if (barGroup) {
-      this.barContainer.insertInto(barGroup, index); //TODO
-      barGroup.updateTextPosition();
+    const { barGroupBox, baselineBar } = this.initBar(index, sub_task_index);
+    if (barGroupBox) {
+      this.barContainer.insertInto(barGroupBox, index); //TODO
+      barGroupBox.updateTextPosition();
     }
+    if (baselineBar) {
+      this.barContainer.insertBefore(baselineBar, barGroupBox);
+    }
+    this.updateOffscreenIndicators();
   }
   initHoverBarIcons() {
     const hoverBarGroup = new Group({
@@ -519,11 +632,176 @@ export class TaskBar {
     hoverBarGroup.appendChild(progressHandle);
   }
 
+  initLocateIconsGroup() {
+    // 覆盖在任务条区域之上（clip = true），仅用于绘制定位图标，避免受任务条容器滚动影响
+    const locateIconsGroup = new Group({
+      x: 0,
+      y: 0,
+      width: this.width,
+      height: this.height,
+      clip: true,
+      pickable: false
+    });
+    this.locateIconsGroup = locateIconsGroup;
+    locateIconsGroup.name = 'task-bar-locate-icons';
+    this.group.appendChild(locateIconsGroup);
+  }
+
+  applyLocateIconStyle(icon: Group, hover: boolean) {
+    const background = (icon as any).background;
+    const arrow = (icon as any).arrow;
+    if (background) {
+      background.setAttribute('fill', hover ? LOCATE_ICON_BG_HOVER : LOCATE_ICON_BG);
+    }
+    if (arrow) {
+      arrow.setAttribute('fill', hover ? LOCATE_ICON_ARROW_HOVER : LOCATE_ICON_ARROW);
+    }
+  }
+
+  createLocateIcon(side: 'left' | 'right', target: GanttTaskBarNode) {
+    const iconGroup = new Group({
+      x: 0,
+      y: 0,
+      width: LOCATE_ICON_SIZE,
+      height: LOCATE_ICON_SIZE,
+      pickable: true,
+      cursor: 'pointer',
+      visibleAll: false
+    });
+    iconGroup.name = side === 'left' ? 'task-bar-locate-icon-left' : 'task-bar-locate-icon-right';
+    (iconGroup as any).attachedToTaskBarNode = target;
+    (iconGroup as any).side = side;
+    const background = createRect({
+      x: 0,
+      y: 0,
+      width: LOCATE_ICON_SIZE,
+      height: LOCATE_ICON_SIZE,
+      cornerRadius: 4,
+      fill: LOCATE_ICON_BG,
+      pickable: false
+    });
+    const arrowSize = 6;
+    const center = LOCATE_ICON_SIZE / 2;
+    const arrow =
+      side === 'left'
+        ? new Polygon({
+            points: [
+              { x: center + arrowSize / 2, y: center - arrowSize },
+              { x: center - arrowSize / 2, y: center },
+              { x: center + arrowSize / 2, y: center + arrowSize }
+            ],
+            fill: LOCATE_ICON_ARROW,
+            pickable: false
+          })
+        : new Polygon({
+            points: [
+              { x: center - arrowSize / 2, y: center - arrowSize },
+              { x: center + arrowSize / 2, y: center },
+              { x: center - arrowSize / 2, y: center + arrowSize }
+            ],
+            fill: LOCATE_ICON_ARROW,
+            pickable: false
+          });
+    iconGroup.appendChild(background);
+    iconGroup.appendChild(arrow);
+    (iconGroup as any).background = background;
+    (iconGroup as any).arrow = arrow;
+    this.applyLocateIconStyle(iconGroup, false);
+    return iconGroup;
+  }
+
+  setLocateIconHover(icon: Group | null) {
+    if (this.currentHoverLocateIcon && this.currentHoverLocateIcon !== icon) {
+      this.applyLocateIconStyle(this.currentHoverLocateIcon, false);
+    }
+    if (icon) {
+      this.applyLocateIconStyle(icon, true);
+    }
+    this.currentHoverLocateIcon = icon;
+    this._scene.updateNextFrame();
+  }
+
+  updateOffscreenIndicators() {
+    if (!this.locateIconsGroup) {
+      return;
+    }
+    // 任务条相对 barContainer 的坐标系：与滚动值一致（scrollLeft / scrollTop）
+    const gantt = this._scene._gantt;
+    const scrollLeft = gantt.stateManager.scrollLeft;
+    const scrollTop = gantt.stateManager.scrollTop;
+    const viewWidth = gantt.tableNoFrameWidth;
+    const viewHeight = this.height;
+    const visibleLeft = scrollLeft;
+    const visibleRight = scrollLeft + viewWidth;
+    const visibleTop = scrollTop;
+    const visibleBottom = scrollTop + viewHeight;
+
+    let child = this.barContainer.firstChild as any;
+    while (child) {
+      if (child.name === 'task-bar') {
+        const bar = child as GanttTaskBarNode;
+        const barLeft = bar.attribute.x;
+        const barRight = barLeft + bar.attribute.width;
+        const barTop = bar.attribute.y;
+        const barBottom = barTop + bar.attribute.height;
+        // 仅当该行在纵向可视范围内时，才展示横向定位图标
+        const verticalVisible = barBottom >= visibleTop && barTop <= visibleBottom;
+        let side: 'left' | 'right' | null = null;
+        if (verticalVisible) {
+          if (barRight < visibleLeft) {
+            side = 'left';
+          } else if (barLeft > visibleRight) {
+            side = 'right';
+          }
+        }
+        const leftIcon = (bar as any).locateLeftIcon as Group;
+        const rightIcon = (bar as any).locateRightIcon as Group;
+        if (!side) {
+          // 使用 visibleAll 关闭整组显隐（包含子图形），避免只隐藏 group 导致残留
+          leftIcon?.setAttribute('visibleAll', false);
+          rightIcon?.setAttribute('visibleAll', false);
+          if (this.currentHoverLocateIcon === leftIcon || this.currentHoverLocateIcon === rightIcon) {
+            this.setLocateIconHover(null);
+          }
+        } else {
+          let icon = side === 'left' ? leftIcon : rightIcon;
+          if (!icon) {
+            icon = this.createLocateIcon(side, bar);
+            if (side === 'left') {
+              (bar as any).locateLeftIcon = icon;
+            } else {
+              (bar as any).locateRightIcon = icon;
+            }
+            this.locateIconsGroup.appendChild(icon);
+          } else if (icon.parent !== this.locateIconsGroup) {
+            this.locateIconsGroup.appendChild(icon);
+          }
+          const iconX = side === 'left' ? LOCATE_ICON_PADDING : viewWidth - LOCATE_ICON_SIZE - LOCATE_ICON_PADDING;
+          // 图标固定在左右边缘，y 跟随任务条行，并转换到“可视区坐标系”
+          const iconY = barTop - scrollTop + (bar.attribute.height - LOCATE_ICON_SIZE) / 2;
+          icon.setAttributes({
+            x: iconX,
+            y: iconY,
+            visibleAll: true
+          });
+          const otherIcon = side === 'left' ? rightIcon : leftIcon;
+          otherIcon?.setAttribute('visibleAll', false);
+          if (this.currentHoverLocateIcon === otherIcon) {
+            this.setLocateIconHover(null);
+          }
+        }
+      }
+      child = child._next;
+    }
+  }
+
   setX(x: number) {
     this.barContainer.setAttribute('x', x);
+    this.updateOffscreenIndicators();
   }
   setY(y: number) {
     this.barContainer.setAttribute('y', y);
+    this.updateOffscreenIndicators();
   }
   /** 重新创建任务条节点 */
   refresh() {
@@ -534,6 +812,11 @@ export class TaskBar {
       width: this.width,
       y: this._scene._gantt.getAllHeaderRowsHeight()
     });
+    this.locateIconsGroup?.setAttributes({
+      width: this.width,
+      height: this.height
+    });
+    this.locateIconsGroup?.removeAllChild();
     const x = this.barContainer.attribute.x;
     const y = this.barContainer.attribute.y;
     this.barContainer.removeAllChild();
@@ -541,12 +824,18 @@ export class TaskBar {
     this.initBars();
     this.setX(x);
     this.setY(y);
+    this.updateOffscreenIndicators();
   }
   resize() {
     this.width = this._scene._gantt.tableNoFrameWidth;
     this.height = this._scene._gantt.gridHeight;
     this.group.setAttribute('width', this.width);
     this.group.setAttribute('height', this.height);
+    this.locateIconsGroup?.setAttributes({
+      width: this.width,
+      height: this.height
+    });
+    this.updateOffscreenIndicators();
   }
 
   showHoverBar(x: number, y: number, width: number, height: number, target?: GanttTaskBarNode) {
@@ -680,7 +969,7 @@ export class TaskBar {
       zIndex: 10000
       // angle: attachedToTaskBarNode.attribute.angle,
       // anchor: attachedToTaskBarNode.attribute.anchor
-    });
+    } as any);
     selectedBorder.name = 'task-bar-select-border';
     this.barContainer.appendChild(selectedBorder);
     this.selectedBorders.push(selectedBorder);
@@ -782,16 +1071,13 @@ export class TaskBar {
     this.selectedBorders[0].appendChild(line);
   }
 
-  getTaskBarNodeByIndex(index: number, sub_task_index?: number): GanttTaskBarNode {
+  getTaskBarNodeByIndex(index: number, sub_task_index?: number | number[]): GanttTaskBarNode {
     let c = this.barContainer.firstChild as GanttTaskBarNode;
     if (!c) {
       return null;
     }
     for (let i = 0; i < this.barContainer.childrenCount; i++) {
-      if (
-        c.task_index === index &&
-        (!isValid(sub_task_index) || (isValid(sub_task_index) && c.sub_task_index === sub_task_index))
-      ) {
+      if (c.task_index === index && isSameSubTaskIndex(c.sub_task_index, sub_task_index)) {
         return c;
       }
       c = c._next as GanttTaskBarNode;

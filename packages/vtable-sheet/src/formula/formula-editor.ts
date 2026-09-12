@@ -7,19 +7,17 @@ import { detectFunctionParameterPosition } from './formula-helper';
 export class FormulaInputEditor extends VTable_editors.InputEditor {
   private formulaAutocomplete: FormulaAutocomplete | null = null;
   private sheet: VTableSheet | null = null;
-  // 定义存储事件处理函数的数组
-  private eventHandlers: Array<{ type: string; handler: EventListener }> = [];
   /**
    * 设置 Sheet 实例
    */
   setSheet(sheet: VTableSheet): void {
     this.sheet = sheet;
   }
-  getInputElement(): HTMLElement {
+  getInputElement(): HTMLInputElement {
     return this.element;
   }
   targetIsOnEditor(target: HTMLElement): boolean {
-    return target === this.element || target === this.sheet.formulaUIManager.formulaInput;
+    return target === this.element || target === this.sheet?.formulaUIManager.formulaInput;
   }
   /**
    * 创建编辑器元素
@@ -67,7 +65,10 @@ export class FormulaInputEditor extends VTable_editors.InputEditor {
 
     const value = this.element.value;
     // 同步内容到顶部输入栏
-    this.sheet.formulaUIManager.formulaInput.value = value;
+    const formulaInput = this.sheet.formulaUIManager.formulaInput;
+    if (formulaInput) {
+      formulaInput.value = value;
+    }
     // const inputEvent = new Event('input', { bubbles: true });
     // Object.defineProperty(inputEvent, 'isFormulaInsertion', { value: true });
     // this.sheet.formulaUIManager.formulaInput.dispatchEvent(inputEvent);
@@ -175,15 +176,49 @@ export class FormulaInputEditor extends VTable_editors.InputEditor {
     if (!this.element || !this.sheet) {
       return;
     }
-    this.element.value = '=' + item.value;
-    // 同步内容到顶部输入栏
-    this.sheet.formulaUIManager.formulaInput.value = this.element.value;
+    const value = this.element.value;
+    const selectionStart = this.element.selectionStart ?? value.length;
+    const selectionEnd = this.element.selectionEnd ?? selectionStart;
 
-    // 触发高亮更新
-    const highlightManager = this.sheet.formulaManager.cellHighlightManager;
-    if (highlightManager && this.element.value.startsWith('=')) {
-      highlightManager.highlightFormulaCells(this.element.value);
+    let replaceStart = selectionStart;
+    let replaceEnd = selectionEnd;
+
+    if (selectionStart === selectionEnd) {
+      replaceStart = selectionStart;
+      while (replaceStart > 1 && /[A-Za-z0-9]/.test(value[replaceStart - 1])) {
+        replaceStart--;
+      }
+      const hasLeftWord = replaceStart < selectionStart;
+      replaceEnd = selectionStart;
+      if (hasLeftWord) {
+        while (replaceEnd < value.length && /[A-Za-z0-9]/.test(value[replaceEnd])) {
+          replaceEnd++;
+        }
+      }
     }
+
+    const isFunction = item?.type === 'function';
+    const itemValue = String(item?.value ?? '');
+    const nextChar = value[replaceEnd];
+    const shouldAppendParen = isFunction && nextChar !== '(';
+
+    const insertText = itemValue + (shouldAppendParen ? '(' : '');
+    const newValue = value.slice(0, replaceStart) + insertText + value.slice(replaceEnd);
+
+    this.element.value = newValue;
+
+    let newCursorPos = replaceStart + itemValue.length;
+    if (isFunction && newValue[newCursorPos] === '(') {
+      newCursorPos += 1;
+    }
+    this.element.setSelectionRange(newCursorPos, newCursorPos);
+
+    if (this.sheet.formulaUIManager.formulaInput) {
+      this.sheet.formulaUIManager.formulaInput.value = newValue;
+    }
+
+    const inputEvent = new Event('input', { bubbles: true });
+    this.element.dispatchEvent(inputEvent);
   }
 
   /**
@@ -240,9 +275,10 @@ export class FormulaInputEditor extends VTable_editors.InputEditor {
     }
     //解绑所有事件
     // 解绑事件（在需要解绑的地方）
-    this.eventHandlers.forEach(({ type, handler }) => {
-      this.element.removeEventListener(type, handler);
-    });
+    this.element &&
+      this.eventHandlers.forEach(({ type, handler }) => {
+        this.element.removeEventListener(type, handler);
+      });
     super.onEnd();
   }
 
@@ -326,4 +362,6 @@ export class FormulaInputEditor extends VTable_editors.InputEditor {
   }
 }
 
-export const formulaEditor = new FormulaInputEditor();
+export function createFormulaEditor(): FormulaInputEditor {
+  return new FormulaInputEditor();
+}

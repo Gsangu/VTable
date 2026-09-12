@@ -11,6 +11,7 @@ import {
   DEFAULT_BODY_MENU_ITEMS,
   DEFAULT_COLUMN_SERIES_MENU_ITEMS
 } from '@visactor/vtable-plugins';
+import { HistoryPlugin } from '@visactor/vtable-plugins';
 import type {
   FilterOptions,
   MenuItemOrSeparator,
@@ -34,27 +35,55 @@ export function getTablePlugins(
   sheetDefine?: ISheetDefine,
   options?: IVTableSheetOptions,
   vtableSheet?: any
-): VTable.plugins.IVTablePlugin[] {
-  const plugins: VTable.plugins.IVTablePlugin[] = [];
+): VTable.pluginsDefinition.IVTablePlugin[] {
+  const plugins: VTable.pluginsDefinition.IVTablePlugin[] = [];
   // 结合options.VTablePluginModules，来判断是否禁用插件
   const disabledPluginsUserSetted = options?.VTablePluginModules?.filter(module => module.disabled);
   let enabledPluginsUserSetted = options?.VTablePluginModules?.filter(module => !module.disabled);
+  if (
+    vtableSheet?.getWorkbookHistoryManager &&
+    !disabledPluginsUserSetted?.some(module => module.module === HistoryPlugin) &&
+    !enabledPluginsUserSetted?.some(module => module.module === HistoryPlugin)
+  ) {
+    const workbookHistory = vtableSheet.getWorkbookHistoryManager();
+    if (typeof HistoryPlugin !== 'function') {
+      console.warn('HistoryPlugin is not available in @visactor/vtable-plugins');
+    } else {
+      plugins.push(
+        new HistoryPlugin({
+          enableCompression: false,
+          onTransactionPushed: (args: any) => {
+            workbookHistory.recordTableTransaction({ sheetKey: args?.sheetKey, tx: args?.tx });
+          }
+        })
+      );
+    }
+  }
   if (!disabledPluginsUserSetted?.some(module => module.module === FilterPlugin)) {
     const userPluginOptions = enabledPluginsUserSetted?.find(module => module.module === FilterPlugin)
       ?.moduleOptions as FilterOptions;
     const filterPlugin = createFilterPlugin(sheetDefine, userPluginOptions);
-    plugins.push(filterPlugin);
+    if (filterPlugin) {
+      plugins.push(filterPlugin);
+    }
   }
   if (!disabledPluginsUserSetted?.some(module => module.module === AddRowColumnPlugin)) {
     const userPluginOptions = enabledPluginsUserSetted?.find(module => module.module === AddRowColumnPlugin)
       ?.moduleOptions as AddRowColumnOptions;
-    const addRowColumnPlugin = new AddRowColumnPlugin({
-      addRowCallback: (row: number, tableInstance: VTable.ListTable) => {
-        tableInstance.addRecord([], row - tableInstance.columnHeaderLevelCount);
-      },
-      ...userPluginOptions
-    });
-    plugins.push(addRowColumnPlugin);
+
+    // Safety check for AddRowColumnPlugin availability
+    if (!AddRowColumnPlugin) {
+      console.warn('AddRowColumnPlugin is not available in @visactor/vtable-plugins');
+    } else {
+      const addRowColumnPlugin = new AddRowColumnPlugin({
+        addRowCallback: (row: number, tableInstance: VTable.ListTable) => {
+          const record = tableInstance.options.addRecordRule === 'Object' ? {} : [];
+          tableInstance.addRecord(record, row - tableInstance.columnHeaderLevelCount);
+        },
+        ...userPluginOptions
+      });
+      plugins.push(addRowColumnPlugin);
+    }
     //已经初始化过的插件，从enabledPluginsUserSetted中移除
     enabledPluginsUserSetted = enabledPluginsUserSetted?.filter(module => module.module !== AddRowColumnPlugin);
   }
@@ -62,26 +91,31 @@ export function getTablePlugins(
     const userPluginOptions = enabledPluginsUserSetted?.find(module => module.module === TableSeriesNumber)
       ?.moduleOptions as TableSeriesNumberOptions;
 
-    // 构建插件选项，包含dragOrder（即使类型定义中没有，插件实际支持）
-    const pluginOptions: TableSeriesNumberOptions & { dragOrder?: any } = {
-      rowCount: sheetDefine?.rowCount || 100,
-      colCount: sheetDefine?.columnCount || 100,
-      rowSeriesNumberWidth: 30,
-      colSeriesNumberHeight: 30,
-      rowSeriesNumberCellStyle:
-        sheetDefine?.theme?.rowSeriesNumberCellStyle || options?.theme?.rowSeriesNumberCellStyle,
-      colSeriesNumberCellStyle:
-        sheetDefine?.theme?.colSeriesNumberCellStyle || options?.theme?.colSeriesNumberCellStyle,
-      ...userPluginOptions
-    };
+    // Safety check for TableSeriesNumber availability
+    if (!TableSeriesNumber) {
+      console.warn('TableSeriesNumber is not available in @visactor/vtable-plugins');
+    } else {
+      // 构建插件选项，包含dragOrder（即使类型定义中没有，插件实际支持）
+      const pluginOptions: TableSeriesNumberOptions & { dragOrder?: any } = {
+        rowCount: sheetDefine?.rowCount || 100,
+        colCount: sheetDefine?.columnCount || 100,
+        rowSeriesNumberWidth: 30,
+        colSeriesNumberHeight: 30,
+        rowSeriesNumberCellStyle:
+          sheetDefine?.theme?.rowSeriesNumberCellStyle || options?.theme?.rowSeriesNumberCellStyle,
+        colSeriesNumberCellStyle:
+          sheetDefine?.theme?.colSeriesNumberCellStyle || options?.theme?.colSeriesNumberCellStyle,
+        ...userPluginOptions
+      };
 
-    // 如果sheet定义中有dragOrder，添加到插件选项中
-    if (sheetDefine?.dragOrder) {
-      pluginOptions.dragOrder = sheetDefine.dragOrder;
+      // 如果sheet定义中有dragOrder，添加到插件选项中
+      if (sheetDefine?.dragOrder) {
+        pluginOptions.dragOrder = sheetDefine.dragOrder;
+      }
+
+      const tableSeriesNumberPlugin = new TableSeriesNumber(pluginOptions);
+      plugins.push(tableSeriesNumberPlugin);
     }
-
-    const tableSeriesNumberPlugin = new TableSeriesNumber(pluginOptions);
-    plugins.push(tableSeriesNumberPlugin);
     //已经初始化过的插件，从enabledPluginsUserSetted中移除
     enabledPluginsUserSetted = enabledPluginsUserSetted?.filter(module => module.module !== TableSeriesNumber);
   }
@@ -100,39 +134,51 @@ export function getTablePlugins(
     const userPluginOptions = enabledPluginsUserSetted?.find(
       module => module.module === ContextMenuPlugin
     )?.moduleOptions;
-    const contextMenuPlugin = createContextMenuItems(sheetDefine, userPluginOptions);
-    plugins.push(contextMenuPlugin);
+
+    // Safety check for ContextMenuPlugin availability
+    if (!ContextMenuPlugin) {
+      console.warn('ContextMenuPlugin is not available in @visactor/vtable-plugins');
+    } else {
+      const contextMenuPlugin = createContextMenuItems(sheetDefine, userPluginOptions);
+      plugins.push(contextMenuPlugin);
+    }
     //已经初始化过的插件，从enabledPluginsUserSetted中移除
     enabledPluginsUserSetted = enabledPluginsUserSetted?.filter(module => module.module !== ContextMenuPlugin);
   }
   if (!disabledPluginsUserSetted?.some(module => module.module === ExcelEditCellKeyboardPlugin)) {
     const userPluginOptions =
       enabledPluginsUserSetted?.find(module => module.module === ExcelEditCellKeyboardPlugin)?.moduleOptions ?? {};
-    // let currentState_editingEditor: IEditor | null = null; //需要在keyDownBeforeCallback中保存下来，因为插件处理事件中会影响这个值（调用了completeEdit）
-    // const keyDownBeforeCallback = function (this: ExcelEditCellKeyboardPlugin, event: KeyboardEvent) {
-    //   currentState_editingEditor = sheet.getActiveSheet()?.tableInstance?.editorManager.editingEditor;
-    // };
-    // // 注意：这里使用普通函数而不是箭头函数，这样才能通过 apply 正确绑定 this 为插件实例
-    // const keyDownAfterCallback = function (this: ExcelEditCellKeyboardPlugin, event: KeyboardEvent) {
-    //   const eventKey = event.key.toLowerCase() as ExcelEditCellKeyboardResponse;
-    //   if (this.responseKeyboard.includes(eventKey)) {
-    //     if (
-    //       (currentState_editingEditor &&
-    //         eventKey !== ExcelEditCellKeyboardResponse.DELETE &&
-    //         eventKey !== ExcelEditCellKeyboardResponse.BACKSPACE) ||
-    //       (!currentState_editingEditor &&
-    //         (eventKey === ExcelEditCellKeyboardResponse.DELETE ||
-    //           eventKey === ExcelEditCellKeyboardResponse.BACKSPACE)) ||
-    //       sheet.formulaManager._formulaWorkingOnCell
-    //     ) {
-    //       event.stopPropagation();
-    //       event.preventDefault();
-    //     }
-    //   }
-    // };
-    // 创建插件时包含回调
-    const excelEditCellKeyboardPlugin = new ExcelEditCellKeyboardPlugin(userPluginOptions);
-    plugins.push(excelEditCellKeyboardPlugin);
+
+    // Safety check for ExcelEditCellKeyboardPlugin availability
+    if (!ExcelEditCellKeyboardPlugin) {
+      console.warn('ExcelEditCellKeyboardPlugin is not available in @visactor/vtable-plugins');
+    } else {
+      // let currentState_editingEditor: IEditor | null = null; //需要在keyDownBeforeCallback中保存下来，因为插件处理事件中会影响这个值（调用了completeEdit）
+      // const keyDownBeforeCallback = function (this: ExcelEditCellKeyboardPlugin, event: KeyboardEvent) {
+      //   currentState_editingEditor = sheet.getActiveSheet()?.tableInstance?.editorManager.editingEditor;
+      // };
+      // // 注意：这里使用普通函数而不是箭头函数，这样才能通过 apply 正确绑定 this 为插件实例
+      // const keyDownAfterCallback = function (this: ExcelEditCellKeyboardPlugin, event: KeyboardEvent) {
+      //   const eventKey = event.key.toLowerCase() as ExcelEditCellKeyboardResponse;
+      //   if (this.responseKeyboard.includes(eventKey)) {
+      //     if (
+      //       (currentState_editingEditor &&
+      //         eventKey !== ExcelEditCellKeyboardResponse.DELETE &&
+      //         eventKey !== ExcelEditCellKeyboardResponse.BACKSPACE) ||
+      //       (!currentState_editingEditor &&
+      //         (eventKey === ExcelEditCellKeyboardResponse.DELETE ||
+      //           eventKey === ExcelEditCellKeyboardResponse.BACKSPACE)) ||
+      //       sheet.formulaManager._formulaWorkingOnCell
+      //     ) {
+      //       event.stopPropagation();
+      //       event.preventDefault();
+      //     }
+      //   }
+      // };
+      // 创建插件时包含回调
+      const excelEditCellKeyboardPlugin = new ExcelEditCellKeyboardPlugin(userPluginOptions);
+      plugins.push(excelEditCellKeyboardPlugin);
+    }
     //已经初始化过的插件，从enabledPluginsUserSetted中移除
     enabledPluginsUserSetted = enabledPluginsUserSetted?.filter(
       module => module.module !== ExcelEditCellKeyboardPlugin
@@ -141,27 +187,45 @@ export function getTablePlugins(
   if (!disabledPluginsUserSetted?.some(module => module.module === AutoFillPlugin)) {
     const userPluginOptions = enabledPluginsUserSetted?.find(module => module.module === AutoFillPlugin)?.moduleOptions;
 
-    // Create formula detection functions that use vtable-sheet's formula engine
-    const formulaDetectionOptions = createFormulaDetectionOptions(sheetDefine, options, vtableSheet);
+    // Safety check for AutoFillPlugin availability
+    if (!AutoFillPlugin) {
+      console.warn('AutoFillPlugin is not available in @visactor/vtable-plugins');
+    } else {
+      // Create formula detection functions that use vtable-sheet's formula engine
+      const formulaDetectionOptions = createFormulaDetectionOptions(sheetDefine, options, vtableSheet);
 
-    const autoFillPlugin = new AutoFillPlugin({
-      ...userPluginOptions,
-      ...formulaDetectionOptions
-    });
-    plugins.push(autoFillPlugin);
+      const autoFillPlugin = new AutoFillPlugin({
+        ...userPluginOptions,
+        ...formulaDetectionOptions
+      });
+      plugins.push(autoFillPlugin);
+    }
     //已经初始化过的插件，从enabledPluginsUserSetted中移除
     enabledPluginsUserSetted = enabledPluginsUserSetted?.filter(module => module.module !== AutoFillPlugin);
   }
   if (enabledPluginsUserSetted?.length) {
     enabledPluginsUserSetted.forEach(
       (module: {
-        module: new (options: unknown) => VTable.plugins.IVTablePlugin;
+        module: new (options: unknown) => VTable.pluginsDefinition.IVTablePlugin;
         moduleOptions: unknown;
         disabled: boolean;
       }) => {
         if (typeof module?.module === 'function') {
-          // 检查是否为构造函数
-          plugins.push(new module.module(module.moduleOptions));
+          let moduleOptions = module.moduleOptions as any;
+          if (module.module === HistoryPlugin && vtableSheet?.getWorkbookHistoryManager) {
+            const workbookHistory = vtableSheet.getWorkbookHistoryManager();
+            const prev = moduleOptions?.onTransactionPushed;
+            moduleOptions = {
+              ...(moduleOptions ?? {}),
+              // vtable-sheet 以工作簿历史栈为准，默认关闭 HistoryPlugin 的压缩，保证连续编辑同一单元格也能逐步撤销。
+              enableCompression: moduleOptions?.enableCompression ?? false,
+              onTransactionPushed: (args: any) => {
+                prev?.(args);
+                workbookHistory.recordTableTransaction({ sheetKey: args?.sheetKey, tx: args?.tx });
+              }
+            };
+          }
+          plugins.push(new module.module(moduleOptions));
         } else {
           console.error(`Invalid plugin: ${module.module}`);
         }
@@ -186,6 +250,12 @@ function createFilterPlugin(sheetDefine?: ISheetDefine, userPluginOptions?: Filt
   //     filterModes: sheetDefine.filter.filterModes
   //   });
   // }
+
+  // 检查 FilterPlugin 是否可用
+  if (!FilterPlugin) {
+    console.warn('FilterPlugin is not available in @visactor/vtable-plugins');
+    return null;
+  }
 
   // 构建插件选项，确保符合FilterOptions接口
   const pluginOptions: FilterOptions = {
@@ -399,7 +469,20 @@ function handleDisableFirstRowAsHeader(table: VTable.ListTable): void {
 /**
  * 创建公式检测选项，使用vtable-sheet的公式引擎
  */
-function createFormulaDetectionOptions(sheetDefine?: ISheetDefine, options?: IVTableSheetOptions, vtableSheet?: any) {
+export function createFormulaDetectionOptions(
+  sheetDefine?: ISheetDefine,
+  options?: IVTableSheetOptions,
+  vtableSheet?: any
+) {
+  const getActiveSheetKey = (): string => {
+    return (
+      vtableSheet?.getActiveSheet?.()?.getKey?.() ||
+      vtableSheet?.sheetManager?.getActiveSheet?.()?.sheetKey ||
+      sheetDefine?.sheetKey ||
+      'Sheet1'
+    );
+  };
+
   return {
     /**
      * 自定义公式检测函数 - 使用vtable-sheet的公式引擎判断是否为公式
@@ -408,7 +491,7 @@ function createFormulaDetectionOptions(sheetDefine?: ISheetDefine, options?: IVT
       // 首先尝试使用vtable-sheet的公式管理器
       if (vtableSheet?.formulaManager) {
         try {
-          const sheetName = (vtableSheet.sheetManager as any)?._activeSheetKey || 'Sheet1';
+          const sheetName = getActiveSheetKey();
           return vtableSheet.formulaManager.isCellFormula({
             sheet: sheetName,
             row: row,
@@ -436,7 +519,7 @@ function createFormulaDetectionOptions(sheetDefine?: ISheetDefine, options?: IVT
       // 首先尝试使用vtable-sheet的公式管理器
       if (vtableSheet?.formulaManager) {
         try {
-          const sheetName = (vtableSheet.sheetManager as any)?._activeSheetKey || 'Sheet1';
+          const sheetName = getActiveSheetKey();
           return vtableSheet.formulaManager.getCellFormula({
             sheet: sheetName,
             row: row,
@@ -463,7 +546,7 @@ function createFormulaDetectionOptions(sheetDefine?: ISheetDefine, options?: IVT
       // 首先尝试使用vtable-sheet的公式管理器
       if (vtableSheet?.formulaManager) {
         try {
-          const sheetName = (vtableSheet.sheetManager as any)?._activeSheetKey || 'Sheet1';
+          const sheetName = getActiveSheetKey();
           vtableSheet.formulaManager.setCellContent(
             {
               sheet: sheetName,

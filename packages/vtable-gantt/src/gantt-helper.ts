@@ -1,5 +1,6 @@
 import type { Group } from '@visactor/vtable/es/vrender';
 import type { Gantt } from './Gantt';
+import { defaultPixelRatio } from './tools/pixel-ratio';
 import {
   TasksShowMode,
   type IMarkLine,
@@ -35,16 +36,21 @@ export const defaultTaskBarStyle = {
   fontFamily: 'Arial',
   fontSize: 14
 };
+
+export const defaultBaselineStyle = {
+  barColor: '#d3d3d3',
+  completedBarColor: '#a9a9a9',
+  width: 20,
+  cornerRadius: 3,
+  borderWidth: 0
+};
 function setWidthToDefaultTaskBarStyle(width: number) {
   defaultTaskBarStyle.width = width;
 }
 const isNode = typeof window === 'undefined' || typeof window.window === 'undefined';
 export const DayTimes = 1000 * 60 * 60 * 24;
 export function getDateIndexByX(x: number, gantt: Gantt) {
-  const totalX = x + gantt.stateManager.scroll.horizontalBarPos;
-  const firstDateColWidth = gantt.getDateColWidth(0);
-  const dateIndex = Math.floor((totalX - firstDateColWidth) / gantt.parsedOptions.timelineColWidth) + 1;
-  return dateIndex;
+  return gantt.getDateIndexByX(x);
 }
 
 export function generateMarkLine(markLine?: boolean | IMarkLine | IMarkLine[]): IMarkLine[] {
@@ -66,30 +72,38 @@ export function generateMarkLine(markLine?: boolean | IMarkLine | IMarkLine[]): 
     ];
   } else if (Array.isArray(markLine)) {
     return markLine.map((item, index) => {
+      const style = item.style;
       return {
         ...item,
         date: item.date,
         scrollToMarkLine: item.scrollToMarkLine,
         position: item.position ?? 'left',
-        style: {
-          lineColor: item.style?.lineColor || 'red',
-          lineWidth: item.style?.lineWidth || 1,
-          lineDash: item.style?.lineDash
-        }
+        style:
+          typeof style === 'function'
+            ? style
+            : {
+                lineColor: style?.lineColor || 'red',
+                lineWidth: style?.lineWidth ?? 1,
+                lineDash: style?.lineDash
+              }
       };
     });
   }
+  const style = (markLine as IMarkLine).style;
   return [
     {
       ...markLine,
       date: (markLine as IMarkLine).date,
       scrollToMarkLine: (markLine as IMarkLine).scrollToMarkLine ?? true,
       position: (markLine as IMarkLine).position ?? 'left',
-      style: {
-        lineColor: (markLine as IMarkLine).style?.lineColor || 'red',
-        lineWidth: (markLine as IMarkLine).style?.lineWidth || 1,
-        lineDash: (markLine as IMarkLine).style?.lineDash
-      }
+      style:
+        typeof style === 'function'
+          ? style
+          : {
+              lineColor: style?.lineColor || 'red',
+              lineWidth: style?.lineWidth ?? 1,
+              lineDash: style?.lineDash
+            }
     }
   ];
 }
@@ -121,13 +135,18 @@ export { isNode };
 export function initOptions(gantt: Gantt) {
   const options = gantt.options;
   gantt.parsedOptions.tasksShowMode = options?.tasksShowMode ?? TasksShowMode.Tasks_Separate;
-  gantt.parsedOptions.pixelRatio = options?.pixelRatio ?? 1;
+  gantt.parsedOptions.pixelRatio = options?.pixelRatio ?? defaultPixelRatio;
   gantt.parsedOptions.rowHeight = options?.rowHeight ?? 40;
   gantt.parsedOptions.timelineColWidth = options?.timelineHeader?.colWidth ?? 60;
   gantt.parsedOptions.startDateField = options.taskBar?.startDateField ?? 'startDate';
   gantt.parsedOptions.endDateField = options.taskBar?.endDateField ?? 'endDate';
   gantt.parsedOptions.progressField = options.taskBar?.progressField ?? 'progress';
+  gantt.parsedOptions.baselineStartDateField = options.taskBar?.baselineStartDateField;
+  gantt.parsedOptions.baselineEndDateField = options.taskBar?.baselineEndDateField;
+  gantt.parsedOptions.baselinePosition = options.taskBar?.baselinePosition ?? 'bottom';
   gantt.parsedOptions.taskBarClip = options?.taskBar?.clip ?? true;
+  // 是否开启“任务条超出可视区”的定位图标能力（默认关闭）
+  gantt.parsedOptions.taskBarLocateIcon = options?.taskBar?.locateIcon ?? false;
   gantt.parsedOptions.projectSubTasksExpandable = options?.projectSubTasksExpandable ?? true;
   // gantt.parsedOptions.minDate = options?.minDate
   //   ? gantt.parsedOptions.timeScaleIncludeHour
@@ -219,6 +238,10 @@ export function initOptions(gantt: Gantt) {
       : options?.taskBar?.projectStyle
       ? Object.assign({}, defaultTaskBarStyle, options?.taskBar?.projectStyle)
       : gantt.parsedOptions.taskBarStyle;
+  gantt.parsedOptions.baselineStyle =
+    options?.taskBar?.baselineStyle && typeof options?.taskBar?.baselineStyle === 'function'
+      ? options.taskBar.baselineStyle
+      : Object.assign({}, defaultBaselineStyle, options?.taskBar?.baselineStyle);
   const defaultMilestoneStyle = {
     labelTextStyle: {
       fontSize: 16,
@@ -393,6 +416,7 @@ export function initOptions(gantt: Gantt) {
     },
     options?.dependency?.linkCreatingLineStyle
   );
+  gantt.parsedOptions.dependencyLinkDistanceToTaskBar = options?.dependency?.distanceToTaskBar ?? 20;
   gantt.parsedOptions.eventOptions = options?.eventOptions;
   gantt.parsedOptions.keyboardOptions = options?.keyboardOptions;
   gantt.parsedOptions.markLineCreateOptions = options?.markLineCreateOptions;
@@ -863,6 +887,7 @@ export function findRecordByTaskKey(
       }
     }
   }
+  return undefined;
 }
 
 export function clearRecordLinkInfos(records: any[], childrenField: string = 'children') {
@@ -1154,6 +1179,7 @@ export function _getTaskInfoByXYForCreateSchedule(eventX: number, eventY: number
       }
     }
   }
+  return undefined;
 }
 
 export function getNodeClickPos(marklineIconNode: Group, gantt: Gantt) {

@@ -320,10 +320,7 @@ function computeAutoColWidth(
       maxWidth = Math.max(indicatorWidth, maxWidth);
       continue;
     }
-
-    const cellType = table.isHeader(col, row)
-      ? (table._getHeaderLayoutMap(col, row) as HeaderData)?.headerType
-      : table.getBodyColumnType(col, row);
+    const cellType = table.getCellType(col, row);
     if (
       isValid(cellType) &&
       cellType !== 'text' &&
@@ -439,11 +436,12 @@ function computeCustomRenderWidth(col: number, row: number, table: BaseTableAPI)
       cellRange = table.getCellRange(col, row);
       spanCol = cellRange.end.col - cellRange.start.col + 1;
     }
+    const skipCellValue = shouldSkipCustomRenderCellValueForComputation(col, row, table);
     const arg = {
       col: cellRange?.start.col ?? col,
       row: cellRange?.start.row ?? row,
-      dataValue: table.getCellOriginValue(col, row),
-      value: table.getCellValue(col, row) || '',
+      dataValue: skipCellValue ? undefined : table.getCellOriginValue(col, row),
+      value: skipCellValue ? undefined : table.getCellValue(col, row),
       rect: getCellRect(col, row, table),
       table,
       originCol: col,
@@ -491,6 +489,12 @@ function computeCustomRenderWidth(col: number, row: number, table: BaseTableAPI)
     };
   }
   return undefined;
+}
+
+function shouldSkipCustomRenderCellValueForComputation(col: number, row: number, table: BaseTableAPI) {
+  return (
+    table.isListTable() && !table.isHeader(col, row) && !(table.internalProps.dataSource as any)?.dataSourceObj?.records
+  );
 }
 
 /**
@@ -713,6 +717,10 @@ export function getAdaptiveWidth(
   const minWidthColumnMap = new Map<number, number>();
   for (let col = startCol; col < endColPlus1; col++) {
     const width = update ? newWidths[col] ?? table.getColWidth(col) : table.getColWidth(col);
+    if (table.widthMode === 'adaptive' && table.internalProps._widthResizedColMap.has(col)) {
+      totalDrawWidth -= width;
+      continue;
+    }
     const maxWidth = table.getMaxColWidth(col);
     const minWidth = table.getMinColWidth(col);
     // if (width !== maxWidth && width !== minWidth) {
@@ -872,6 +880,14 @@ function _parseColumnWidthConfigForPivotTable(
         table._setColWidth(cell.col, width);
         table.internalProps._widthResizedColMap.add(cell.col); // add resize tag
       }
+    } else if (
+      (!dimensions || dimensions.length === 0) &&
+      (table.internalProps.layoutMap.columnTree?.length ?? 0) === 0
+    ) {
+      if (!table.internalProps._widthResizedColMap.has(table.rowHeaderLevelCount)) {
+        table._setColWidth(table.rowHeaderLevelCount, width);
+        table.internalProps._widthResizedColMap.add(table.rowHeaderLevelCount); // add resize tag
+      }
     }
   }
 }
@@ -886,7 +902,7 @@ function _parseColumnWidthConfigForPivotRowHeader(
     const dimensions = item.dimensions;
     const width = item.width;
     const cell = table.getCellAddressByHeaderPaths(dimensions);
-    if (cell && cell.col < table.rowHeaderLevelCount) {
+    if (cell && cell.col < table.rowHeaderLevelCount + table.leftRowSeriesNumberCount) {
       if (!table.internalProps._widthResizedColMap.has(cell.col)) {
         table._setColWidth(cell.col, width);
         table.internalProps._widthResizedColMap.add(cell.col); // add resize tag

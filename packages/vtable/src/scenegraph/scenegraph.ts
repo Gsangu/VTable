@@ -1,5 +1,20 @@
-import type { IStage, IRect, ITextCache, INode, Text, RichText, Stage, IRectGraphicAttribute } from '@src/vrender';
-import { createStage, createRect, IContainPointMode, container, vglobal, registerForVrender } from '@src/vrender';
+import {
+  createRect,
+  type CheckBox,
+  type FederatedPointerEvent,
+  type IContainPointMode,
+  type INode,
+  type IRect,
+  type IRectGraphicAttribute,
+  type IStage,
+  type ITextCache,
+  type RichText,
+  type Stage,
+  type Text,
+  setPoptipTheme,
+  registerForVrender
+} from '@src/vrender';
+import { createStageFromVRenderApp } from '../vrender-app';
 import type { CellRange, CellSubLocation, PivotChartConstructorOptions } from '../ts-types';
 import {
   type CellAddress,
@@ -19,7 +34,6 @@ import { updateRowHeight } from './layout/update-height';
 import { updateImageCellContentWhileResize } from './group-creater/cell-type/image-cell';
 import { getQuadProps } from './utils/padding';
 import { createFrameBorder, updateCornerRadius, updateFrameBorder, updateFrameBorderSize } from './style/frame-border';
-import splitModule from './graphic/contributions';
 import { getFunctionalProp, getProp } from './utils/get-prop';
 import { dealWithIcon } from './utils/text-icon-layout';
 import { SceneProxy } from './group-creater/progress/proxy';
@@ -43,15 +57,14 @@ import { computeRowHeight, computeRowsHeight } from './layout/compute-row-height
 import { emptyGroup } from './utils/empty-group';
 import { dealBottomFrozen, dealFrozen, dealRightFrozen, resetFrozen, resetRowFrozen } from './layout/frozen';
 import {
+  clearCellChartCacheImage,
   updateChartSizeForResizeColWidth,
   updateChartSizeForResizeRowHeight,
   updateChartState
 } from './refresh-node/update-chart';
 import { initSceneGraph } from './group-creater/init-scenegraph';
 import { updateContainerChildrenX, updateContainerChildrenY } from './utils/update-container';
-import type { CheckBox } from '@src/vrender';
-import { loadPoptip, setPoptipTheme } from '@src/vrender';
-import textMeasureModule from './utils/text-measure';
+import { installVTableRuntimeContributions } from './runtime-contributions';
 import {
   getIconByXY,
   hideClickIcon,
@@ -79,21 +92,18 @@ import { temporarilyUpdateSelectRectStyle } from './select/update-select-style';
 import type { CheckboxContent } from './component/checkbox-content';
 // import { contextModule } from './context/module';
 
-import type { FederatedPointerEvent } from '@src/vrender';
 import { TABLE_EVENT_TYPE } from '../core/TABLE_EVENT_TYPE';
 import { getCellEventArgsSet } from '../event/util';
 import type { SceneEvent } from '../event/util';
 import type { Chart } from './graphic/chart';
+import {
+  clearAndReleaseBrushingChartInstance,
+  getBrushingChartInstance,
+  getBrushingChartInstanceCellPos
+} from './graphic/active-cell-chart-list';
 
 registerForVrender();
-
-// VChart poptip theme
-// loadPoptip();
-container.load(splitModule);
-container.load(textMeasureModule);
-// container.load(renderServiceModule);
-// container.load(contextModule);
-// console.log(container);
+installVTableRuntimeContributions();
 
 export type MergeMap = Map<
   string,
@@ -120,6 +130,15 @@ export class Scenegraph {
   leftBottomCornerGroup: Group; // 左下角占位单元格Group,只在有下侧冻结行时使用
   rightBottomCornerGroup: Group; // 右下角占位单元格Group,只在有右侧下侧都有冻结行时使用
   componentGroup: Group; // 表格外组件Group
+  bodySelectGroup: Group;
+  rowHeaderSelectGroup: Group;
+  bottomFrozenSelectGroup: Group;
+  colHeaderSelectGroup: Group;
+  rightFrozenSelectGroup: Group;
+  rightTopCornerSelectGroup: Group;
+  leftBottomCornerSelectGroup: Group;
+  rightBottomCornerSelectGroup: Group;
+  cornerHeaderSelectGroup: Group;
   /** 所有选中区域对应的选框组件 */
   selectedRangeComponents: Map<string, { rect: IRect; fillhandle?: IRect; role: CellSubLocation }>;
   /** 当前正在选择区域对应的选框组件 为什么是map 以为可能一个选中区域会被拆分为多个rect组件 三块表头和body都分别对应不同组件*/
@@ -128,6 +147,8 @@ export class Scenegraph {
   lastSelectId: string;
   component: TableComponent;
   stage: IStage;
+  stageOwned: boolean = true;
+  releaseVRenderAppRef?: () => void;
   table: BaseTableAPI;
   isPivot: boolean;
   // transpose: boolean;
@@ -140,54 +161,94 @@ export class Scenegraph {
   _dealAutoFillHeightOriginRowsHeight: number; // hack 缓存一个值 用于处理autoFillHeight的逻辑判断 在某些情况下是需要更新此值的 如增删数据 但目前没有做这个
 
   _needUpdateContainer: boolean = false;
+
+  // 图表实例管理相关属性（从全局变量迁移过来）
+  /** 存储当前被执行brush框选操作的图表实例。目的是希望在鼠标离开框选的单元格 不希望chart实例马上释放掉。 实例需要保留住，这样brush框才会不消失 */
+  brushingChartInstance: any;
+  /** brush操作对应的单元格位置 */
+  brushingChartInstanceCellPos: { col: number; row: number };
+  /** 存储可视区域内鼠标hover到的该列的图表实例，key为列号做个缓存 */
+  chartInstanceListColumnByColumnDirection: Record<number, Record<number, any>>;
+  /** 存储可视区域内鼠标hover到的该行的图表实例，key为行号做个缓存 */
+  chartInstanceListRowByRowDirection: Record<number, Record<number, any>>;
+  /** 列方向延迟执行的定时器数组 */
+  delayRunDimensionHoverTimerForColumnDirection: any[];
+  /** 行方向延迟执行的定时器数组 */
+  delayRunDimensionHoverTimerForRowDirection: any[];
+  /** 视图范围延迟执行的定时器数组 */
+  delayRunDimensionHoverTimerForViewRange: any[];
+  /** 是否禁用所有图表实例的tooltip */
+  disabledTooltipToAllChartInstances: boolean;
   constructor(table: BaseTableAPI) {
     this.table = table;
     this.hasFrozen = false;
     this.clear = true;
     this.mergeMap = new Map();
 
+    // 初始化图表实例管理相关属性
+    this.brushingChartInstance = undefined;
+    this.brushingChartInstanceCellPos = { col: -1, row: -1 };
+    this.chartInstanceListColumnByColumnDirection = {};
+    this.chartInstanceListRowByRowDirection = {};
+    this.delayRunDimensionHoverTimerForColumnDirection = [];
+    this.delayRunDimensionHoverTimerForRowDirection = [];
+    this.delayRunDimensionHoverTimerForViewRange = [];
+    this.disabledTooltipToAllChartInstances = false;
+
     setPoptipTheme(this.table.theme.textPopTipStyle);
     let width;
     let height;
-    if (Env.mode === 'node') {
-      vglobal.setEnv('node', table.options.modeParams);
+    const mode = table.options.mode ?? (Env.mode === 'node' ? 'node' : 'browser');
+
+    if (mode === 'node') {
       width = table.canvasWidth;
       height = table.canvasHeight;
     } else if (table.options.canvas && table.options.viewBox) {
-      vglobal.setEnv('browser');
       width = table.options.viewBox.x2 - table.options.viewBox.x1;
       height = table.options.viewBox.y2 - table.options.viewBox.y1;
     } else {
-      vglobal.setEnv('browser');
       width = table.canvas.width;
       height = table.canvas.height;
     }
-    this.stage = createStage({
-      canvas: table.canvas,
-      width,
-      height,
-      disableDirtyBounds: false,
-      background: table.theme.underlayBackgroundColor,
-      dpr: table.internalProps.pixelRatio,
-      enableLayout: true,
-      // enableHtmlAttribute: true,
-      // pluginList: table.isPivotChart() ? ['poptipForText'] : undefined,
-      beforeRender: (stage: Stage) => {
-        this.table.options.beforeRender && this.table.options.beforeRender(stage);
-        this.table.animationManager.ticker.start();
-      },
-      afterRender: (stage: Stage) => {
-        this.table.options.afterRender && this.table.options.afterRender(stage);
-        this.table.fireListeners('after_render', null);
-        // console.trace('after_render');
-      },
-      // event: { clickInterval: 400 }
-      // autoRender: true
+    const { stage, releaseAppRef, stageOwned } = createStageFromVRenderApp(
+      {
+        canvas: table.canvas,
+        width,
+        height,
+        disableDirtyBounds: false,
+        background: table.theme.underlayBackgroundColor,
+        dpr: table.internalProps.pixelRatio,
+        enableLayout: true,
+        // enableHtmlAttribute: true,
+        // pluginList: table.isPivotChart() ? ['poptipForText'] : undefined,
+        beforeRender: (stage: Stage) => {
+          this.table.options.beforeRender && this.table.options.beforeRender(stage);
+          this.table.animationManager.ticker.start();
+        },
+        afterRender: (stage: Stage) => {
+          this.table.options.afterRender && this.table.options.afterRender(stage);
+          this.table.fireListeners('after_render', null);
+          // console.trace('after_render');
+        },
+        // event: { clickInterval: 400 }
+        // autoRender: true
 
-      canvasControled: !table.options.canvas,
-      viewBox: table.options.viewBox,
-      ...table.options.renderOption
-    });
+        canvasControled: !table.options.canvas,
+        viewBox: table.options.viewBox,
+        context: { appName: 'vtable' },
+        ...table.options.renderOption
+      },
+      {
+        mode,
+        scope: table.options.vRenderAppScope ?? 'vtable',
+        app: table.options.vRenderApp,
+        stage: table.options.stage,
+        envParams: table.options.modeParams
+      }
+    );
+    this.stage = stage;
+    this.stageOwned = stageOwned;
+    this.releaseVRenderAppRef = releaseAppRef;
 
     this.stage.defaultLayer.setTheme({
       group: {
@@ -307,6 +368,15 @@ export class Scenegraph {
     delete this.rightBottomCornerGroup.border;
     this.leftBottomCornerGroup.clear();
     delete this.leftBottomCornerGroup.border;
+    this.bodySelectGroup?.clear();
+    this.rowHeaderSelectGroup?.clear();
+    this.bottomFrozenSelectGroup?.clear();
+    this.colHeaderSelectGroup?.clear();
+    this.rightFrozenSelectGroup?.clear();
+    this.rightTopCornerSelectGroup?.clear();
+    this.leftBottomCornerSelectGroup?.clear();
+    this.rightBottomCornerSelectGroup?.clear();
+    this.cornerHeaderSelectGroup?.clear();
 
     this.colHeaderGroup.setAttributes({
       x: 0,
@@ -365,6 +435,65 @@ export class Scenegraph {
       height: 0,
       visible: false
     });
+    this.bodySelectGroup?.setAttributes({
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0
+    });
+    this.rowHeaderSelectGroup?.setAttributes({
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0
+    });
+    this.bottomFrozenSelectGroup?.setAttributes({
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+      visible: false
+    });
+    this.colHeaderSelectGroup?.setAttributes({
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0
+    });
+    this.rightFrozenSelectGroup?.setAttributes({
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+      visible: false
+    });
+    this.rightTopCornerSelectGroup?.setAttributes({
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+      visible: false
+    });
+    this.leftBottomCornerSelectGroup?.setAttributes({
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+      visible: false
+    });
+    this.rightBottomCornerSelectGroup?.setAttributes({
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+      visible: false
+    });
+    this.cornerHeaderSelectGroup?.setAttributes({
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0
+    });
 
     this.tableGroup.setAttributes({
       x: this.table.tableX,
@@ -380,6 +509,27 @@ export class Scenegraph {
     this.proxy?.release();
 
     this.table.reactCustomLayout?.clearCache();
+  }
+
+  releaseStage() {
+    this.clear = true;
+    this._needUpdateContainer = false;
+    const releaseAppRef = this.releaseVRenderAppRef;
+    this.releaseVRenderAppRef = undefined;
+
+    try {
+      if (this.stageOwned) {
+        this.stage?.release();
+      } else {
+        const tableGroup = this.tableGroup;
+        const tableGroupParent = tableGroup?.parent as Group | undefined;
+
+        tableGroupParent?.removeChild?.(tableGroup);
+        tableGroup?.release?.(true);
+      }
+    } finally {
+      releaseAppRef?.();
+    }
   }
 
   updateStageBackground() {
@@ -710,21 +860,43 @@ export class Scenegraph {
    * @param row
    * @returns
    */
-  deactivateChart(col: number, row: number) {
+  deactivateChart(col: number, row: number, forceRelease: boolean = false) {
+    if (forceRelease) {
+      // 处理场景：brush操作后，鼠标直接移动到空白区域进行滚动，希望释放掉brush操作的图表实例
+      const brushingChartInstanceCellPos = getBrushingChartInstanceCellPos(this);
+      const brushingChartInstance = getBrushingChartInstance(this);
+      if (brushingChartInstanceCellPos && brushingChartInstance) {
+        clearAndReleaseBrushingChartInstance(this);
+        //单独清理brush操作的单元格的chart缓存图片  因为updateChartState逻辑走到的clearChartCacheImage方法清理时排除了brushing cell的chart缓存图片(有绘制图片的那个共享图表实例覆盖到activechart实例上问题)
+        clearCellChartCacheImage(brushingChartInstanceCellPos.col, brushingChartInstanceCellPos.row, this);
+      }
+    }
     if (col === -1 || row === -1) {
       return;
     }
     const cellGroup = this.getCell(col, row);
     if ((cellGroup?.firstChild as any)?.deactivate) {
+      if (forceRelease) {
+        (cellGroup?.firstChild as any)?.deactivate?.(this.table, {
+          forceRelease: true,
+          releaseChartInstance: true,
+          releaseColumnChartInstance: true,
+          releaseRowChartInstance: true,
+          releaseAllChartInstance: true
+        });
+        return;
+      }
       const chartNode = cellGroup?.firstChild as Chart;
       const chartType = chartNode.attribute.spec.type;
 
       (cellGroup?.firstChild as any)?.deactivate?.(
         this.table,
-        (this.table.options as PivotChartConstructorOptions).chartDimensionLinkage
+        (this.table.options as PivotChartConstructorOptions).chartDimensionLinkage?.showTooltip
           ? {
               releaseChartInstance:
-                chartType === 'scatter' // 散点图一般是横纵crosshair 所以需要判断是否是hover的单元格 是否是超出图表显示区域到了边界表头或者轴单元格
+                chartType === 'pie'
+                  ? false
+                  : chartType === 'scatter' // 散点图一般是横纵crosshair 所以需要判断是否是hover的单元格 是否是超出图表显示区域到了边界表头或者轴单元格
                   ? (col !== this.table.stateManager.hover.cellPos.col &&
                       row !== this.table.stateManager.hover.cellPos.row) ||
                     this.table.stateManager.hover.cellPos.row < this.table.frozenRowCount ||
@@ -741,13 +913,18 @@ export class Scenegraph {
                     this.table.stateManager.hover.cellPos.row >
                       this.table.rowCount - 1 - this.table.bottomFrozenRowCount,
               releaseColumnChartInstance:
-                col !== this.table.stateManager.hover.cellPos.col ||
-                this.table.stateManager.hover.cellPos.row < this.table.frozenRowCount ||
-                this.table.stateManager.hover.cellPos.row > this.table.rowCount - 1 - this.table.bottomFrozenRowCount,
+                chartType === 'pie'
+                  ? false
+                  : col !== this.table.stateManager.hover.cellPos.col ||
+                    this.table.stateManager.hover.cellPos.row < this.table.frozenRowCount ||
+                    this.table.stateManager.hover.cellPos.row >
+                      this.table.rowCount - 1 - this.table.bottomFrozenRowCount,
               releaseRowChartInstance:
-                row !== this.table.stateManager.hover.cellPos.row ||
-                this.table.stateManager.hover.cellPos.col < this.table.frozenColCount ||
-                this.table.stateManager.hover.cellPos.col > this.table.colCount - 1 - this.table.rightFrozenColCount
+                chartType === 'pie'
+                  ? false
+                  : row !== this.table.stateManager.hover.cellPos.row ||
+                    this.table.stateManager.hover.cellPos.col < this.table.frozenColCount ||
+                    this.table.stateManager.hover.cellPos.col > this.table.colCount - 1 - this.table.rightFrozenColCount
             }
           : undefined
       );
@@ -819,8 +996,14 @@ export class Scenegraph {
    * @param {number} detaX 改变的宽度值
    * @return {*}
    */
-  updateColWidth(col: number, detaX: number, skipUpdateContainer?: boolean, skipTableWidthMap?: boolean) {
-    updateColWidth(this, col, Math.round(detaX), skipTableWidthMap);
+  updateColWidth(
+    col: number,
+    detaX: number,
+    skipUpdateContainer?: boolean,
+    skipTableWidthMap?: boolean,
+    pendingCornerCustomMergeRanges?: Map<string, CellRange>
+  ) {
+    updateColWidth(this, col, Math.round(detaX), skipTableWidthMap, pendingCornerCustomMergeRanges);
     // this.updateContainerWidth(col, detaX);
     if (!skipUpdateContainer) {
       // this.updateContainerAttrWidthAndX();
@@ -845,9 +1028,18 @@ export class Scenegraph {
   updateChartSizeForResizeRowHeight(row: number) {
     updateChartSizeForResizeRowHeight(this, row);
   }
-  /** 更新图表的高亮状态 */
-  updateChartState(datum: any) {
-    this.table.isPivotChart() && updateChartState(this, datum);
+  /** 更新图表的高亮状态 点击图元或者框选brush选中图元 一般有高亮状态*/
+  updateChartState(datum: any, selectedDataMode: 'click' | 'brush' | 'multiple-select') {
+    if (this.table.isPivotChart()) {
+      if (datum === null || datum === undefined || datum?.length === 0 || Object.keys(datum).length === 0) {
+        const brushingChartInstance = getBrushingChartInstance(this);
+        if (brushingChartInstance) {
+          brushingChartInstance.getChart()?.getComponentsByKey('brush')[0].clearBrushStateAndMask();
+        }
+        (this.table.options as PivotChartConstructorOptions).chartDimensionLinkage?.clearChartState?.();
+      }
+      updateChartState(this, datum, selectedDataMode);
+    }
   }
 
   updateCheckboxCellState(col: number, row: number, checked: boolean | 'indeterminate') {
@@ -1179,118 +1371,189 @@ export class Scenegraph {
       height: tableHeight
     } as any);
 
-    if (this.tableGroup.border) {
-      const rectAttributes = this.tableGroup.border?.attribute;
-      let borderTop;
-      let borderRight;
-      let borderBottom;
-      let borderLeft;
-      if ((rectAttributes as any)?.strokeArrayWidth) {
-        borderTop = (rectAttributes as any).strokeArrayWidth
-          ? (rectAttributes as any).strokeArrayWidth[0]
-          : (rectAttributes.lineWidth as number) ?? 0;
-        borderRight = (rectAttributes as any).strokeArrayWidth
-          ? (rectAttributes as any).strokeArrayWidth[1]
-          : (rectAttributes.lineWidth as number) ?? 0;
-        borderBottom = (rectAttributes as any).strokeArrayWidth
-          ? (rectAttributes as any).strokeArrayWidth[2]
-          : (rectAttributes.lineWidth as number) ?? 0;
-        borderLeft = (rectAttributes as any).strokeArrayWidth
-          ? (rectAttributes as any).strokeArrayWidth[3]
-          : (rectAttributes.lineWidth as number) ?? 0;
-      } else {
-        borderTop = (rectAttributes?.lineWidth as number) ?? 0;
-        borderRight = (rectAttributes?.lineWidth as number) ?? 0;
-        borderBottom = (rectAttributes?.lineWidth as number) ?? 0;
-        borderLeft = (rectAttributes?.lineWidth as number) ?? 0;
-      }
-      if (this.tableGroup.border.type === 'rect') {
-        if (this.table.theme.frameStyle?.innerBorder) {
-          this.tableGroup.border.setAttributes({
-            x: this.table.tableX + borderLeft / 2,
-            y: this.table.tableY + borderTop / 2,
-            width: this.tableGroup.attribute.width - borderLeft / 2 - borderRight / 2,
-            height: this.tableGroup.attribute.height - borderTop / 2 - borderBottom / 2
-          });
-        } else {
-          this.tableGroup.border.setAttributes({
-            x: this.table.tableX - borderLeft / 2,
-            y: this.table.tableY - borderTop / 2,
-            width: this.tableGroup.attribute.width + borderLeft / 2 + borderRight / 2,
-            height: this.tableGroup.attribute.height + borderTop / 2 + borderBottom / 2
-          });
-        }
-      } else if (this.tableGroup.border.type === 'group') {
-        if (this.table.theme.frameStyle?.innerBorder) {
-          this.tableGroup.border.setAttributes({
-            x: this.table.tableX + borderLeft / 2,
-            y: this.table.tableY + borderTop / 2,
-            width: this.tableGroup.attribute.width - borderLeft / 2 - borderRight / 2,
-            height: this.tableGroup.attribute.height - borderTop / 2 - borderBottom / 2
-          });
-          (this.tableGroup.border.firstChild as IRect)?.setAttributes({
-            x: 0,
-            y: 0,
-            width: this.tableGroup.attribute.width - borderLeft / 2 - borderRight / 2,
-            height: this.tableGroup.attribute.height - borderTop / 2 - borderBottom / 2
-          });
-        } else {
-          this.tableGroup.border.setAttributes({
-            x: this.table.tableX - borderLeft / 2,
-            y: this.table.tableY - borderTop / 2,
-            width: this.tableGroup.attribute.width + borderLeft / 2 + borderRight / 2,
-            height: this.tableGroup.attribute.height + borderTop / 2 + borderBottom / 2
-          });
-          (this.tableGroup.border.firstChild as IRect)?.setAttributes({
-            x: borderLeft / 2,
-            y: borderTop / 2,
-            width: this.tableGroup.attribute.width,
-            height: this.tableGroup.attribute.height
-          });
-        }
-      }
-    }
+    const hasFrozenCols = this.table.frozenColCount > 0;
+    const hasRightFrozenCols = this.table.rightFrozenColCount > 0;
+    const hasFrozenRows = this.table.frozenRowCount > 0;
+    const hasBottomFrozenRows = this.table.bottomFrozenRowCount > 0;
 
-    if (this.table.bottomFrozenRowCount > 0) {
-      this.bottomFrozenGroup.setAttribute(
-        'y',
-        this.tableGroup.attribute.height - this.table.getBottomFrozenRowsHeight()
+    if (hasBottomFrozenRows) {
+      const bottomFrozenRowsHeight = this.table.getBottomFrozenRowsHeight();
+      const topFrozenBottom = Math.max(
+        this.colHeaderGroup.attribute.y + this.colHeaderGroup.attribute.height,
+        this.cornerHeaderGroup.attribute.y + this.cornerHeaderGroup.attribute.height,
+        this.rightTopCornerGroup.attribute.y + this.rightTopCornerGroup.attribute.height
       );
+      const middleContentBottom = Math.max(
+        this.rowHeaderGroup.attribute.y + this.rowHeaderGroup.attribute.height,
+        this.bodyGroup.attribute.y + this.bodyGroup.attribute.height,
+        this.rightFrozenGroup.attribute.y + this.rightFrozenGroup.attribute.height,
+        topFrozenBottom
+      );
+      const bottomFrozenY = Math.min(this.tableGroup.attribute.height - bottomFrozenRowsHeight, middleContentBottom);
+      this.bottomFrozenGroup.setAttribute('y', bottomFrozenY);
       this.leftBottomCornerGroup.setAttributes({
-        visible: true,
-        y: this.tableGroup.attribute.height - this.table.getBottomFrozenRowsHeight(),
-        height: this.table.getBottomFrozenRowsHeight(),
-        width: this.table.getFrozenColsWidth()
+        visible: hasFrozenCols,
+        y: bottomFrozenY,
+        height: bottomFrozenRowsHeight,
+        width: hasFrozenCols ? this.table.getFrozenColsWidth() : 0
       });
       this.rightBottomCornerGroup.setAttributes({
-        visible: true,
-        y: this.tableGroup.attribute.height - this.table.getBottomFrozenRowsHeight(),
-        height: this.table.getBottomFrozenRowsHeight()
+        visible: hasRightFrozenCols,
+        x: 0,
+        y: bottomFrozenY,
+        width: 0,
+        height: bottomFrozenRowsHeight
+      });
+    } else {
+      this.leftBottomCornerGroup.setAttributes({
+        visible: false,
+        width: 0,
+        height: 0
+      });
+      this.rightBottomCornerGroup.setAttributes({
+        visible: false,
+        width: 0,
+        height: 0
       });
     }
 
-    if (this.table.rightFrozenColCount > 0) {
-      this.rightFrozenGroup.setAttribute('x', this.tableGroup.attribute.width - this.table.getRightFrozenColsWidth());
+    if (hasRightFrozenCols) {
+      const rightFrozenColsWidth = this.table.getRightFrozenColsWidth();
+      const middleContentRight = Math.max(
+        this.colHeaderGroup.attribute.x + this.colHeaderGroup.attribute.width,
+        this.bodyGroup.attribute.x + this.bodyGroup.attribute.width,
+        this.bottomFrozenGroup.attribute.x + this.bottomFrozenGroup.attribute.width
+      );
+      const rightFrozenX = Math.min(this.tableGroup.attribute.width - rightFrozenColsWidth, middleContentRight);
+      this.rightFrozenGroup.setAttribute('x', rightFrozenX);
       this.rightTopCornerGroup.setAttributes({
-        visible: true,
-        x: this.tableGroup.attribute.width - this.table.getRightFrozenColsWidth(),
-        width: this.table.getRightFrozenColsWidth(),
-        height: this.table.getFrozenRowsHeight()
+        visible: hasFrozenRows,
+        x: rightFrozenX,
+        width: hasFrozenRows ? rightFrozenColsWidth : 0,
+        height: hasFrozenRows ? this.table.getFrozenRowsHeight() : 0
       });
       this.rightBottomCornerGroup.setAttributes({
-        visible: true,
-        x: this.tableGroup.attribute.width - this.table.getRightFrozenColsWidth(),
-        width: this.table.getRightFrozenColsWidth()
+        visible: hasBottomFrozenRows,
+        x: rightFrozenX,
+        width: hasBottomFrozenRows ? rightFrozenColsWidth : 0,
+        height: hasBottomFrozenRows ? this.table.getBottomFrozenRowsHeight() : 0
+      });
+    } else {
+      this.rightTopCornerGroup.setAttributes({
+        visible: false,
+        width: 0,
+        height: 0
       });
     }
+
+    if (hasBottomFrozenRows && !this.table.containerFit?.height) {
+      const actualContentBottom = Math.max(
+        this.colHeaderGroup.attribute.y + this.colHeaderGroup.attribute.height,
+        this.cornerHeaderGroup.attribute.y + this.cornerHeaderGroup.attribute.height,
+        this.rightTopCornerGroup.attribute.y + this.rightTopCornerGroup.attribute.height,
+        this.rowHeaderGroup.attribute.y + this.rowHeaderGroup.attribute.height,
+        this.bodyGroup.attribute.y + this.bodyGroup.attribute.height,
+        this.rightFrozenGroup.attribute.y + this.rightFrozenGroup.attribute.height,
+        this.leftBottomCornerGroup.attribute.y + this.leftBottomCornerGroup.attribute.height,
+        this.bottomFrozenGroup.attribute.y + this.bottomFrozenGroup.attribute.height,
+        this.rightBottomCornerGroup.attribute.y + this.rightBottomCornerGroup.attribute.height
+      );
+
+      if (actualContentBottom > 0 && actualContentBottom < this.tableGroup.attribute.height) {
+        this.tableGroup.setAttribute('height', actualContentBottom);
+      }
+    }
+
+    this.updateTableGroupBorder();
 
     // update dom container size
     this.updateDomContainer();
   }
 
-  updateRowHeight(row: number, detaY: number, skipTableHeightMap?: boolean) {
+  updateTableGroupBorder() {
+    if (!this.tableGroup.border) {
+      return;
+    }
+
+    const rectAttributes = this.tableGroup.border?.attribute;
+    let borderTop;
+    let borderRight;
+    let borderBottom;
+    let borderLeft;
+    if ((rectAttributes as any)?.strokeArrayWidth) {
+      borderTop = (rectAttributes as any).strokeArrayWidth
+        ? (rectAttributes as any).strokeArrayWidth[0]
+        : (rectAttributes.lineWidth as number) ?? 0;
+      borderRight = (rectAttributes as any).strokeArrayWidth
+        ? (rectAttributes as any).strokeArrayWidth[1]
+        : (rectAttributes.lineWidth as number) ?? 0;
+      borderBottom = (rectAttributes as any).strokeArrayWidth
+        ? (rectAttributes as any).strokeArrayWidth[2]
+        : (rectAttributes.lineWidth as number) ?? 0;
+      borderLeft = (rectAttributes as any).strokeArrayWidth
+        ? (rectAttributes as any).strokeArrayWidth[3]
+        : (rectAttributes.lineWidth as number) ?? 0;
+    } else {
+      borderTop = (rectAttributes?.lineWidth as number) ?? 0;
+      borderRight = (rectAttributes?.lineWidth as number) ?? 0;
+      borderBottom = (rectAttributes?.lineWidth as number) ?? 0;
+      borderLeft = (rectAttributes?.lineWidth as number) ?? 0;
+    }
+    if (this.tableGroup.border.type === 'rect') {
+      if (this.table.theme.frameStyle?.innerBorder) {
+        this.tableGroup.border.setAttributes({
+          x: this.table.tableX + borderLeft / 2,
+          y: this.table.tableY + borderTop / 2,
+          width: this.tableGroup.attribute.width - borderLeft / 2 - borderRight / 2,
+          height: this.tableGroup.attribute.height - borderTop / 2 - borderBottom / 2
+        });
+      } else {
+        this.tableGroup.border.setAttributes({
+          x: this.table.tableX - borderLeft / 2,
+          y: this.table.tableY - borderTop / 2,
+          width: this.tableGroup.attribute.width + borderLeft / 2 + borderRight / 2,
+          height: this.tableGroup.attribute.height + borderTop / 2 + borderBottom / 2
+        });
+      }
+    } else if (this.tableGroup.border.type === 'group') {
+      if (this.table.theme.frameStyle?.innerBorder) {
+        this.tableGroup.border.setAttributes({
+          x: this.table.tableX + borderLeft / 2,
+          y: this.table.tableY + borderTop / 2,
+          width: this.tableGroup.attribute.width - borderLeft / 2 - borderRight / 2,
+          height: this.tableGroup.attribute.height - borderTop / 2 - borderBottom / 2
+        });
+        (this.tableGroup.border.firstChild as IRect)?.setAttributes({
+          x: 0,
+          y: 0,
+          width: this.tableGroup.attribute.width - borderLeft / 2 - borderRight / 2,
+          height: this.tableGroup.attribute.height - borderTop / 2 - borderBottom / 2
+        });
+      } else {
+        this.tableGroup.border.setAttributes({
+          x: this.table.tableX - borderLeft / 2,
+          y: this.table.tableY - borderTop / 2,
+          width: this.tableGroup.attribute.width + borderLeft / 2 + borderRight / 2,
+          height: this.tableGroup.attribute.height + borderTop / 2 + borderBottom / 2
+        });
+        (this.tableGroup.border.firstChild as IRect)?.setAttributes({
+          x: borderLeft / 2,
+          y: borderTop / 2,
+          width: this.tableGroup.attribute.width,
+          height: this.tableGroup.attribute.height
+        });
+      }
+    }
+  }
+
+  updateRowHeight(
+    row: number,
+    detaY: number,
+    skipTableHeightMap?: boolean,
+    pendingCornerCustomMergeRanges?: Map<string, CellRange>
+  ) {
     detaY = Math.round(detaY);
-    updateRowHeight(this, row, detaY, skipTableHeightMap);
+    updateRowHeight(this, row, detaY, skipTableHeightMap, pendingCornerCustomMergeRanges);
     this.updateContainerHeight(row, detaY);
   }
   updateRowsHeight(rows: number[], detaYs: number[], skipTableHeightMap?: boolean) {
@@ -1407,10 +1670,14 @@ export class Scenegraph {
    */
   setBodyAndRowHeaderY(y: number) {
     // correct y, avoid scroll out of range
-    const firstBodyCell =
-      (this.bodyGroup.firstChild?.firstChild as Group) ?? (this.rowHeaderGroup.firstChild?.firstChild as Group);
-    const lastBodyCell =
-      (this.bodyGroup.firstChild?.lastChild as Group) ?? (this.rowHeaderGroup.firstChild?.lastChild as Group);
+    // border 始终作为最后一个子元素（addChild/appendChild），firstChild 无需过滤
+    const firstBodyColGroup = this.bodyGroup.firstChild as Group;
+    const firstRowHeaderColGroup = this.rowHeaderGroup.firstChild as Group;
+    const firstBodyCell = (firstBodyColGroup?.firstChild as Group) ?? (firstRowHeaderColGroup?.firstChild as Group);
+    let lastBodyCell = (firstBodyColGroup?.lastChild ?? firstRowHeaderColGroup?.lastChild) as Group;
+    if (lastBodyCell && lastBodyCell.type !== 'group') {
+      lastBodyCell = lastBodyCell._prev as Group;
+    }
     if (
       y === 0 &&
       firstBodyCell &&
@@ -1437,8 +1704,21 @@ export class Scenegraph {
     }
     this.bodyGroup.setAttribute('y', this.colHeaderGroup.attribute.height + y);
     this.rowHeaderGroup.setAttribute('y', this.cornerHeaderGroup.attribute.height + y);
+    this.bodySelectGroup.setAttribute('y', this.bodyGroup.attribute.y);
+    this.rowHeaderSelectGroup.setAttribute('y', this.rowHeaderGroup.attribute.y);
+    this.colHeaderSelectGroup.setAttribute('y', this.colHeaderGroup.attribute.y);
+    this.cornerHeaderSelectGroup.setAttribute('y', this.cornerHeaderGroup.attribute.y);
     if (this.table.rightFrozenColCount > 0) {
       this.rightFrozenGroup.setAttribute('y', this.rightTopCornerGroup.attribute.height + y);
+      this.rightFrozenSelectGroup.setAttribute('y', this.rightFrozenGroup.attribute.y);
+      this.rightTopCornerSelectGroup.setAttribute('y', this.rightTopCornerGroup.attribute.y);
+    }
+    if (this.table.bottomFrozenRowCount > 0) {
+      this.bottomFrozenSelectGroup.setAttribute('y', this.bottomFrozenGroup.attribute.y);
+      this.leftBottomCornerSelectGroup.setAttribute('y', this.leftBottomCornerGroup.attribute.y);
+    }
+    if (this.table.rightFrozenColCount > 0 && this.table.bottomFrozenRowCount > 0) {
+      this.rightBottomCornerSelectGroup.setAttribute('y', this.rightBottomCornerGroup.attribute.y);
     }
     // this.tableGroup.setAttribute('height', this.table.tableNoFrameHeight - y);
     // (this.tableGroup.lastChild as any).setAttribute('width', this.table.tableNoFrameWidth - x);
@@ -1452,8 +1732,12 @@ export class Scenegraph {
    */
   setBodyAndColHeaderX(x: number) {
     // correct x, avoid scroll out of range
+    // border 始终作为最后一个子元素（addChild/appendChild），firstChild 无需过滤
     const firstBodyCol = this.bodyGroup.firstChild as Group;
-    const lastBodyCol = this.bodyGroup.lastChild as Group;
+    let lastBodyCol = this.bodyGroup.lastChild as Group;
+    if (lastBodyCol && lastBodyCol.type !== 'group') {
+      lastBodyCol = lastBodyCol._prev as Group;
+    }
     if (x === 0 && firstBodyCol && firstBodyCol.col === this.table.frozenColCount && firstBodyCol.attribute.x + x < 0) {
       x = -firstBodyCol.attribute.x;
     } else if (
@@ -1470,13 +1754,29 @@ export class Scenegraph {
         lastBodyCol.attribute.x -
         lastBodyCol.attribute.width;
     }
+    if (this.table.options.scrollFrozenCols && x > 0) {
+      x = 0;
+    }
     if (this.table.getFrozenColsWidth() + x === this.bodyGroup.attribute.x) {
       return;
     }
     this.bodyGroup.setAttribute('x', this.table.getFrozenColsWidth() + x);
     this.colHeaderGroup.setAttribute('x', this.table.getFrozenColsWidth() + x);
+    this.bodySelectGroup.setAttribute('x', this.bodyGroup.attribute.x);
+    this.colHeaderSelectGroup.setAttribute('x', this.colHeaderGroup.attribute.x);
+    this.rowHeaderSelectGroup.setAttribute('x', this.rowHeaderGroup.attribute.x);
+    this.cornerHeaderSelectGroup.setAttribute('x', this.cornerHeaderGroup.attribute.x);
     if (this.table.bottomFrozenRowCount > 0) {
       this.bottomFrozenGroup.setAttribute('x', this.table.getFrozenColsWidth() + x);
+      this.bottomFrozenSelectGroup.setAttribute('x', this.bottomFrozenGroup.attribute.x);
+      this.leftBottomCornerSelectGroup.setAttribute('x', this.leftBottomCornerGroup.attribute.x);
+    }
+    if (this.table.rightFrozenColCount > 0) {
+      this.rightFrozenSelectGroup.setAttribute('x', this.rightFrozenGroup.attribute.x);
+      this.rightTopCornerSelectGroup.setAttribute('x', this.rightTopCornerGroup.attribute.x);
+    }
+    if (this.table.rightFrozenColCount > 0 && this.table.bottomFrozenRowCount > 0) {
+      this.rightBottomCornerSelectGroup.setAttribute('x', this.rightBottomCornerGroup.attribute.x);
     }
     this.updateNextFrame();
   }
@@ -1535,6 +1835,11 @@ export class Scenegraph {
     }
     if (this.table.options.menu?.contextMenuWorkOnlyCell === false) {
       this.canvasShowMenu();
+    }
+    // addRecords / setRecords 等数据变更路径可能会 clearCells + recreate scenegraph，
+    // 选区组件挂在 overlay 下会被清空，因此需要在场景树重建完成后按 state 重新创建选区图元。
+    if (this.table.stateManager.select.ranges?.length) {
+      this.recreateAllSelectRangeComponents();
     }
     this.updateNextFrame();
   }
@@ -1609,11 +1914,17 @@ export class Scenegraph {
     this.rowHeaderGroup.forEachChildrenSkipChild((column: Group) => {
       rowHeaderWidth += column.attribute.width;
     });
+    if (table.options.scrollFrozenCols) {
+      rowHeaderWidth = table.getFrozenColsWidth();
+    }
     this.rowHeaderGroup.setAttribute('width', rowHeaderWidth);
     let cornerHeaderWidth = 0;
     this.cornerHeaderGroup.forEachChildrenSkipChild((column: Group) => {
       cornerHeaderWidth += column.attribute.width;
     });
+    if (table.options.scrollFrozenCols) {
+      cornerHeaderWidth = table.getFrozenColsWidth();
+    }
     this.cornerHeaderGroup.setAttribute('width', cornerHeaderWidth);
     this.colHeaderGroup.setAttribute('x', this.cornerHeaderGroup.attribute.width);
     this.rowHeaderGroup.setAttribute('y', this.cornerHeaderGroup.attribute.height);
@@ -1783,9 +2094,17 @@ export class Scenegraph {
   }
 
   updateContainerAttrWidthAndX() {
+    const frozenStartX = -(this.table.getFrozenColsScrollLeft?.() ?? 0);
+    const frozenViewportWidth = this.table.getFrozenColsWidth();
+    const rightFrozenStartX =
+      -this.table.getRightFrozenColsOffset() + (this.table.getRightFrozenColsScrollLeft?.() ?? 0);
+    const rightFrozenContentWidth = this.table.getRightFrozenColsContentWidth();
+    // rightFrozenStartX 需要同时考虑“右冻结内容溢出量”与“右冻结滚动位置”：
+    // - 右冻结内容默认是贴在最右侧的，因此需要先整体向左偏移 offset（使右侧内容尾部对齐视口）
+    // - 再加上 scrollLeft（在视口内左右移动查看隐藏的列）
     // 更新各列x&col
-    const cornerX = updateContainerChildrenX(this.cornerHeaderGroup, 0);
-    const rowHeaderX = updateContainerChildrenX(this.rowHeaderGroup, 0);
+    updateContainerChildrenX(this.cornerHeaderGroup, frozenStartX);
+    updateContainerChildrenX(this.rowHeaderGroup, frozenStartX);
     const colHeaderX =
       this.colHeaderGroup.hasChildNodes() && this.colHeaderGroup.firstChild
         ? updateContainerChildrenX(
@@ -1804,10 +2123,9 @@ export class Scenegraph {
               : 0
           )
         : 0;
-    const rightX = updateContainerChildrenX(
-      this.rightFrozenGroup.childrenCount > 0 ? this.rightFrozenGroup : this.rightTopCornerGroup,
-      0
-    );
+    if (this.rightFrozenGroup.childrenCount > 0) {
+      updateContainerChildrenX(this.rightFrozenGroup, rightFrozenStartX);
+    }
 
     this.bottomFrozenGroup.hasChildNodes() &&
       this.bottomFrozenGroup.firstChild &&
@@ -1817,25 +2135,42 @@ export class Scenegraph {
           ? this.table.getColsWidth(this.table.frozenColCount ?? 0, (this.bottomFrozenGroup.firstChild as any).col - 1)
           : 0
       );
-    updateContainerChildrenX(this.leftBottomCornerGroup, 0);
-    updateContainerChildrenX(this.rightTopCornerGroup, 0);
-    updateContainerChildrenX(this.rightBottomCornerGroup, 0);
+    updateContainerChildrenX(this.leftBottomCornerGroup, frozenStartX);
+    updateContainerChildrenX(this.rightTopCornerGroup, rightFrozenStartX);
+    updateContainerChildrenX(this.rightBottomCornerGroup, rightFrozenStartX);
 
     // 更新容器
-    this.cornerHeaderGroup.setDeltaWidth(cornerX - this.cornerHeaderGroup.attribute.width);
-    this.leftBottomCornerGroup.setDeltaWidth(cornerX - this.leftBottomCornerGroup.attribute.width);
+    this.cornerHeaderGroup.setDeltaWidth(frozenViewportWidth - this.cornerHeaderGroup.attribute.width);
+    this.leftBottomCornerGroup.setDeltaWidth(frozenViewportWidth - this.leftBottomCornerGroup.attribute.width);
     //TODO 可能有影响
     this.colHeaderGroup.setDeltaWidth(colHeaderX - this.colHeaderGroup.attribute.width);
     // this.rightFrozenGroup.setDeltaWidth(colHeaderX - this.table.getRightFrozenColsWidth());
-    this.rowHeaderGroup.setDeltaWidth(rowHeaderX - this.rowHeaderGroup.attribute.width);
+    this.rowHeaderGroup.setDeltaWidth(frozenViewportWidth - this.rowHeaderGroup.attribute.width);
     this.bottomFrozenGroup.setDeltaWidth(colHeaderX - this.bottomFrozenGroup.attribute.width);
-    this.rightFrozenGroup.setDeltaWidth(rightX - this.rightFrozenGroup.attribute.width);
-    this.rightTopCornerGroup.setDeltaWidth(rightX - this.rightTopCornerGroup.attribute.width);
-    this.rightBottomCornerGroup.setDeltaWidth(rightX - this.rightBottomCornerGroup.attribute.width);
+    this.rightFrozenGroup.setDeltaWidth(rightFrozenContentWidth - this.rightFrozenGroup.attribute.width);
+    this.rightTopCornerGroup.setDeltaWidth(rightFrozenContentWidth - this.rightTopCornerGroup.attribute.width);
+    this.rightBottomCornerGroup.setDeltaWidth(rightFrozenContentWidth - this.rightBottomCornerGroup.attribute.width);
     this.bodyGroup.setDeltaWidth(bodyX - this.bodyGroup.attribute.width);
     this.colHeaderGroup.setAttribute('x', this.cornerHeaderGroup.attribute.width);
     this.bottomFrozenGroup.setAttribute('x', this.table.getFrozenColsWidth());
     this.bodyGroup.setAttribute('x', this.rowHeaderGroup.attribute.width);
+  }
+
+  setFrozenColsScrollLeft(left: number) {
+    const frozenStartX = -left;
+    updateContainerChildrenX(this.cornerHeaderGroup, frozenStartX);
+    updateContainerChildrenX(this.rowHeaderGroup, frozenStartX);
+    updateContainerChildrenX(this.leftBottomCornerGroup, frozenStartX);
+    this.updateNextFrame();
+  }
+
+  setRightFrozenColsScrollLeft(left: number) {
+    // rightStartX 以“右冻结内容右对齐”为基准，再叠加 scrollLeft 在视口内平移
+    const rightStartX = -this.table.getRightFrozenColsOffset() + left;
+    updateContainerChildrenX(this.rightFrozenGroup, rightStartX);
+    updateContainerChildrenX(this.rightTopCornerGroup, rightStartX);
+    updateContainerChildrenX(this.rightBottomCornerGroup, rightStartX);
+    this.updateNextFrame();
   }
 
   updateContainerAttrHeightAndY() {
@@ -1901,6 +2236,10 @@ export class Scenegraph {
       if (!this._needUpdateContainer) {
         this._needUpdateContainer = true;
         setTimeout(() => {
+          if (!this._needUpdateContainer || this.clear) {
+            this._needUpdateContainer = false;
+            return;
+          }
           this.updateContainerSync(updateConfig.needUpdateCellY ?? false);
         }, 0);
       }
@@ -1920,6 +2259,7 @@ export class Scenegraph {
       this.updateContainerAttrHeightAndY();
     }
     this.updateTableSize();
+    this.syncSelectOverlayGroups();
     this.component.updateScrollBar();
 
     // this.updateDomContainer();
@@ -1927,15 +2267,99 @@ export class Scenegraph {
     this.updateNextFrame();
   }
 
+  syncSelectOverlayGroups() {
+    this.bodySelectGroup.setAttributes({
+      x: this.bodyGroup.attribute.x,
+      y: this.bodyGroup.attribute.y,
+      width: this.bodyGroup.attribute.width,
+      height: this.bodyGroup.attribute.height
+    });
+    this.rowHeaderSelectGroup.setAttributes({
+      x: this.rowHeaderGroup.attribute.x,
+      y: this.rowHeaderGroup.attribute.y,
+      width: this.rowHeaderGroup.attribute.width,
+      height: this.rowHeaderGroup.attribute.height
+    });
+    this.colHeaderSelectGroup.setAttributes({
+      x: this.colHeaderGroup.attribute.x,
+      y: this.colHeaderGroup.attribute.y,
+      width: this.colHeaderGroup.attribute.width,
+      height: this.colHeaderGroup.attribute.height
+    });
+    this.cornerHeaderSelectGroup.setAttributes({
+      x: this.cornerHeaderGroup.attribute.x,
+      y: this.cornerHeaderGroup.attribute.y,
+      width: this.cornerHeaderGroup.attribute.width,
+      height: this.cornerHeaderGroup.attribute.height
+    });
+
+    this.rightFrozenSelectGroup.setAttributes({
+      x: this.rightFrozenGroup.attribute.x,
+      y: this.rightFrozenGroup.attribute.y,
+      width: this.rightFrozenGroup.attribute.width,
+      height: this.rightFrozenGroup.attribute.height,
+      visible: this.rightFrozenGroup.attribute.visible
+    });
+    this.bottomFrozenSelectGroup.setAttributes({
+      x: this.bottomFrozenGroup.attribute.x,
+      y: this.bottomFrozenGroup.attribute.y,
+      width: this.bottomFrozenGroup.attribute.width,
+      height: this.bottomFrozenGroup.attribute.height,
+      visible: this.bottomFrozenGroup.attribute.visible
+    });
+    this.rightTopCornerSelectGroup.setAttributes({
+      x: this.rightTopCornerGroup.attribute.x,
+      y: this.rightTopCornerGroup.attribute.y,
+      width: this.rightTopCornerGroup.attribute.width,
+      height: this.rightTopCornerGroup.attribute.height,
+      visible: this.rightTopCornerGroup.attribute.visible
+    });
+    this.leftBottomCornerSelectGroup.setAttributes({
+      x: this.leftBottomCornerGroup.attribute.x,
+      y: this.leftBottomCornerGroup.attribute.y,
+      width: this.leftBottomCornerGroup.attribute.width,
+      height: this.leftBottomCornerGroup.attribute.height,
+      visible: this.leftBottomCornerGroup.attribute.visible
+    });
+    this.rightBottomCornerSelectGroup.setAttributes({
+      x: this.rightBottomCornerGroup.attribute.x,
+      y: this.rightBottomCornerGroup.attribute.y,
+      width: this.rightBottomCornerGroup.attribute.width,
+      height: this.rightBottomCornerGroup.attribute.height,
+      visible: this.rightBottomCornerGroup.attribute.visible
+    });
+  }
+
+  getSelectOverlayGroup(selectRangeType: CellSubLocation): Group {
+    switch (selectRangeType) {
+      case 'body':
+        return this.bodySelectGroup;
+      case 'rowHeader':
+        return this.rowHeaderSelectGroup;
+      case 'bottomFrozen':
+        return this.bottomFrozenSelectGroup;
+      case 'columnHeader':
+        return this.colHeaderSelectGroup;
+      case 'rightFrozen':
+        return this.rightFrozenSelectGroup;
+      case 'rightTopCorner':
+        return this.rightTopCornerSelectGroup;
+      case 'leftBottomCorner':
+        return this.leftBottomCornerSelectGroup;
+      case 'rightBottomCorner':
+        return this.rightBottomCornerSelectGroup;
+      case 'cornerHeader':
+      default:
+        return this.cornerHeaderSelectGroup;
+    }
+  }
+
   updateCellContentWhileResize(col: number, row: number) {
     const isVtableMerge = this.table.getCellRawRecord(col, row)?.vtableMerge;
-    const type = isVtableMerge
-      ? 'text'
-      : this.table.isHeader(col, row)
-      ? (this.table._getHeaderLayoutMap(col, row) as HeaderData).headerType
-      : this.table.getBodyColumnType(col, row);
+
+    const type = isVtableMerge ? 'text' : this.table.getCellType(col, row);
     const cellGroup = this.getCell(col, row);
-    if (type === 'image' || type === 'video') {
+    if (type === 'image' || type === 'video' || type === 'audio') {
       updateImageCellContentWhileResize(cellGroup, col, row, 0, 0, this.table);
     }
   }

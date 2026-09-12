@@ -39,6 +39,8 @@ Supported event types:
   RESIZE_COLUMN_END: 'resize_column_end',
   RESIZE_ROW: 'resize_row',
   RESIZE_ROW_END: 'resize_row_end',
+  MERGE_CELLS: 'merge_cells',
+  UNMERGE_CELLS: 'unmerge_cells',
   CHANGE_HEADER_POSITION: 'change_header_position',
   CHANGE_HEADER_POSITION_START: 'change_header_position_start',
   CHANGING_HEADER_POSITION: 'changing_header_position',
@@ -217,7 +219,6 @@ Column width adjustment end event.
 
 Event callback function parameter types.
 ``
-
 {
 col: number.
 colWidths: number[]
@@ -252,6 +253,34 @@ rowHeight: number
 }
 
 ``
+
+## MERGE_CELLS
+
+Triggered after `mergeCells` succeeds.
+
+Callback parameter:
+```ts
+{
+  startCol: number;
+  startRow: number;
+  endCol: number;
+  endRow: number;
+}
+```
+
+## UNMERGE_CELLS
+
+Triggered after `unmergeCells` is called.
+
+Callback parameter:
+```ts
+{
+  startCol: number;
+  startRow: number;
+  endCol: number;
+  endRow: number;
+}
+```
 
 ## CHANGE_HEADER_POSITION
 
@@ -593,6 +622,31 @@ Parameter types of event callback function:
 ```
 { col: number; row: number; rawValue: string | number; currentValue: string | number; changedValue: string | number };
 ```
+
+## CHANGE_CELL_VALUES
+
+Batch cell value change event (aggregated).
+
+Parameter types of event callback function:
+
+```
+{
+  values: Array<{
+    col: number;
+    row: number;
+    recordIndex?: number | number[];
+    field?: string | number;
+    rawValue: string | number;
+    currentValue: string | number;
+    changedValue: string | number;
+  }>;
+};
+```
+
+**Notes:**
+
+- This event may be suppressed by the `noTriggerChangeCellValuesEvent` parameter in relevant APIs.
+- When multiple cells are updated in batch, the event will be fired once with an aggregated `values` list.
 
 ## CHECKBOX_STATE_CHANGE
 

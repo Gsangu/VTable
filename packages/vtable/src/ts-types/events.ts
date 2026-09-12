@@ -7,7 +7,7 @@ import type {
   ListTableConstructorOptions,
   PivotTableConstructorOptions
 } from './table-engine';
-import type { DropDownMenuEventArgs, MenuListItem, PivotInfo } from './menu';
+import type { ContextMenuClickEventArgs, DropDownMenuEventArgs, MenuListItem, PivotInfo } from './menu';
 
 import type { IDimensionInfo, MergeCellInfo, RectProps, SortOrder } from './common';
 import type { IconFuncTypeEnum, CellInfo, HierarchyState, ColumnsDefine } from '.';
@@ -84,6 +84,7 @@ export interface TableEventHandlersEventArgumentMap {
   mouseup_cell: MousePointerCellEvent;
   contextmenu_cell: MousePointerMultiCellEvent;
   contextmenu_canvas: MousePointerCellEvent;
+  context_menu_click: ContextMenuClickEventArgs;
   before_keydown: KeydownEvent;
   keydown: KeydownEvent;
   scroll: {
@@ -280,9 +281,22 @@ export interface TableEventHandlersEventArgumentMap {
   change_cell_value: {
     col: number;
     row: number;
+    recordIndex?: number | number[];
+    field?: FieldDef;
     rawValue: string | number;
     currentValue: string | number;
     changedValue: string | number;
+  };
+  change_cell_values: {
+    values: {
+      col: number;
+      row: number;
+      recordIndex?: number | number[];
+      field?: FieldDef;
+      rawValue: string | number;
+      currentValue: string | number;
+      changedValue: string | number;
+    }[];
   };
 
   mousedown_fill_handle: {};
@@ -318,6 +332,7 @@ export interface TableEventHandlersEventArgumentMap {
 
   delete_record: {
     recordIndexs: number[] | number[][];
+    records: any[];
     rowIndexs: number[];
     deletedCount: number;
   };
@@ -336,6 +351,22 @@ export interface TableEventHandlersEventArgumentMap {
     // deleteBeforeColumns: ColumnsDefine;
     deleteColIndexs: number[];
     columns: ColumnsDefine;
+    deletedColumns?: ColumnsDefine;
+    deletedRecordValues?: any[][];
+  };
+
+  merge_cells: {
+    startCol: number;
+    startRow: number;
+    endCol: number;
+    endRow: number;
+  };
+
+  unmerge_cells: {
+    startCol: number;
+    startRow: number;
+    endCol: number;
+    endRow: number;
   };
 }
 export interface DrillMenuEventInfo {
@@ -365,6 +396,7 @@ export interface TableEventHandlersReturnMap {
   mouseup_cell: void;
   contextmenu_cell: void;
   contextmenu_canvas: void;
+  context_menu_click: void;
   before_keydown: void;
   keydown: void;
   scroll: void;
@@ -426,6 +458,7 @@ export interface TableEventHandlersReturnMap {
 
   after_update_select_border_height: void;
   change_cell_value: void;
+  change_cell_values: void;
   mousedown_fill_handle: void;
   drag_fill_handle_end: void;
   dblclick_fill_handle: void;
@@ -447,6 +480,8 @@ export interface TableEventHandlersReturnMap {
   update_record: void;
   add_column: void;
   delete_column: void;
+  merge_cells: void;
+  unmerge_cells: void;
 
   filter_menu_show: { col: number; row: number };
   filter_menu_hide: { col: number; row: number };

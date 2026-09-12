@@ -275,6 +275,14 @@
             "en": "Gantt DataZoomAxis Scrollbar"
           }
         }
+        ,
+        {
+          "path": "gantt_baseline",
+          "title": {
+            "zh": "基线任务条",
+            "en": "Gantt Baseline"
+          }
+        }
       ]
     },
     {
@@ -928,6 +936,13 @@
           "title": {
             "zh": "插件贡献",
             "en": "plugin contribute"
+          }
+        },
+        {
+          "path": "history",
+          "title": {
+            "zh": "撤销重做（历史）",
+            "en": "history (undo/redo)"
           }
         },
         {

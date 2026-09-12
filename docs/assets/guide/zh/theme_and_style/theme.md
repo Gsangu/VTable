@@ -1197,3 +1197,34 @@ const tableInstance = new VTable.PivotTable(document.getElementById(CONTAINER_ID
 ```
 
 总之，在 VTable 中，通过灵活运用主题配置项，我们可以轻松打造出专属的、符合需求的数据表格样式。请参照本教程，结合实际场景进行合理配置，发挥 VTable 强大的主题定制能力。
+
+## 设置默认主题
+
+应用或组件库可以在初始化时调用 `VTable.themes.setDefaultTheme(theme)`，配置表格未显式指定 `theme` 时使用的默认主题。该设置适用于 ListTable、PivotTable 和 PivotChart。
+
+```javascript
+const originalDefault = VTable.themes.DEFAULT;
+VTable.themes.setDefaultTheme(
+  originalDefault.extends({
+    defaultStyle: { fontFamily: 'Arial, sans-serif' },
+    bodyStyle: { color: '#243447' },
+    headerStyle: { bgColor: '#f2f4f7' }
+  })
+);
+
+// 无需传入 option.theme，即可使用配置后的默认主题。
+const table = new VTable.ListTable({ container, columns, records });
+
+// 通过原有主题 API 继承配置后的默认主题。
+const customTheme = VTable.themes.DEFAULT.extends({ headerStyle: { color: '#345678' } });
+
+// 恢复原始默认主题，供后续操作使用。
+VTable.themes.setDefaultTheme(originalDefault);
+```
+
+参数为 `ITableThemeDefine` 对象或 `TableTheme`，会**替换**上一次设置的默认主题；如需与当前默认主题合并，请显式使用 `themes.DEFAULT.extends(...)`。函数返回 `void`。
+
+- `themes.DEFAULT`、内部默认回退和内置名称 `DEFAULT` 使用新的主题。用户注册的主题名称仍遵循原有查询优先级，包括用户注册的同名 `DEFAULT`。
+- 已有实例和此前通过 `extends()` 创建的主题保留其主题对象，不会自动重绘。之后调用未指定 `theme` 的 `updateOption()` 时使用当前默认主题；如需显式应用到已有实例，可调用 `table.updateTheme(VTable.themes.DEFAULT)`。
+- 显式指定的实例主题、其他内置主题、主题注册和 `updateTheme()` 保持原有行为。独立的局部主题不会继承配置后的默认值；需要继承时请使用 `extends()`。
+- 此设置由使用同一份 VTable 运行时的调用方共享，建议在创建表格前完成配置。它不是实例级设置，也不会自动切换所有已有表格的主题。

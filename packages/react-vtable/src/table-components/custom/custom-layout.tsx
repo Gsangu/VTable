@@ -1,12 +1,11 @@
 /* eslint-disable react-hooks/rules-of-hooks */
 import type { PropsWithChildren, ReactElement } from 'react';
-import React, { isValidElement, useCallback, useContext, useLayoutEffect, useRef } from 'react';
+import React, { isValidElement, useCallback, useContext, useLayoutEffect, useRef, useState } from 'react';
 import RootTableContext from '../../context/table';
 import { Group } from '@visactor/vtable/es/vrender';
 import type { ICustomLayoutFuc, CustomRenderFunctionArg } from '@visactor/vtable/es/ts-types';
 import type { FiberRoot } from 'react-reconciler';
-import { reconcilor } from './reconciler';
-import { LegacyRoot } from 'react-reconciler/constants';
+import type { ReconcilerErrorReporter, ReconcilerErrorType } from './reconciler';
 
 type CustomLayoutProps = { componentId: string };
 
@@ -21,38 +20,74 @@ export const CustomLayout: React.FC<CustomLayoutProps> = (props: PropsWithChildr
     return null;
   }
   const context = useContext(RootTableContext);
-  const { table } = context;
+  const { table, onError } = context;
+  const [reconcilerReady, setReconcilerReady] = useState(false);
+  const reconcilerModule = useRef<ReconcilerModule | null>(null);
 
   const isHeaderCustomLayout = children.props.role === 'header-custom-layout';
 
   // react customLayout component container cache
   const container = useRef<Map<string, FiberRoot>>(new Map());
 
+  const reportReconcilerError: ReconcilerErrorReporter = useCallback(
+    (type, error) => {
+      if (!onError) {
+        return;
+      }
+      if (error instanceof Error) {
+        const wrapped = new Error(`[react-vtable custom-layout:${type}] ${error.message}`);
+        (wrapped as any).stack = error.stack;
+        onError(wrapped);
+        return;
+      }
+      const message = typeof error === 'string' ? error : (error as any)?.message ?? String(error);
+      onError(new Error(`[react-vtable custom-layout:${type}] ${message}`));
+    },
+    [onError]
+  );
+
+  useLayoutEffect(() => {
+    let released = false;
+    // Load the custom-layout reconciler only when CustomLayout is actually used.
+    import('./reconciler')
+      .then(module => {
+        if (released) {
+          return;
+        }
+        reconcilerModule.current = module;
+        setReconcilerReady(true);
+      })
+      .catch(error => {
+        reportReconcilerError('uncaught', error);
+      });
+    return () => {
+      released = true;
+    };
+  }, [reportReconcilerError]);
+
   // customLayout function for vtable
   const createGraphic: ICustomLayoutFuc = useCallback(
-    args => {
+    (args: any) => {
+      const module = reconcilerModule.current;
+      if (!module) {
+        return {
+          rootContainer: new Group({}),
+          renderDefault: !!children.props.renderDefault
+        };
+      }
       const key = `${args.originCol ?? args.col}-${args.originRow ?? args.row}${
         args.forComputation ? '-forComputation' : ''
       }`;
       let group;
       if (container.current.has(key)) {
         const currentContainer = container.current.get(key);
-        reconcilorUpdateContainer(children, currentContainer, args);
+        reconcilorUpdateContainer(module, children, currentContainer, args);
         group = currentContainer.containerInfo;
       } else {
         group = new Group({});
-        const currentContainer = reconcilor.createContainer(
-          group as any,
-          LegacyRoot,
-          null,
-          null,
-          null,
-          'custom',
-          null,
-          null
-        );
+        const currentContainer = module.createReconcilerContainer(group as any, 'custom', reportReconcilerError);
         container.current.set(key, currentContainer);
-        reconcilorUpdateContainer(children, currentContainer, args);
+        reconcilorUpdateContainer(module, children, currentContainer, args);
       }
 
       return {
@@ -60,27 +95,45 @@ export const CustomLayout: React.FC<CustomLayoutProps> = (props: PropsWithChildr
         renderDefault: !!children.props.renderDefault
       };
     },
-    [children]
+    [children, reportReconcilerError]
   );
 
   const removeContainer = useCallback((col: number, row: number) => {
+    const module = reconcilerModule.current;
+    if (!module) {
+      return;
+    }
     const key = `${col}-${row}`;
     if (container.current.has(key)) {
       const currentContainer = container.current.get(key);
-      reconcilor.updateContainer(null, currentContainer, null);
-      // group = currentContainer.containerInfo;
-      currentContainer.containerInfo.delete();
-      container.current.delete(key);
+      reconcilorUnmountContainer(module, currentContainer);
+      if (container.current.get(key) === currentContainer) {
+        currentContainer.containerInfo.delete();
+        container.current.delete(key);
+      }
     }
   }, []);
 
   const removeAllContainer = useCallback(() => {
-    container.current.forEach((value, key) => {
-      const currentContainer = value;
-      reconcilor.updateContainer(null, currentContainer, null);
-      currentContainer.containerInfo.delete();
+    const module = reconcilerModule.current;
+    if (!module) {
+      container.current.clear();
+      return;
+    }
+    const pendingContainers = Array.from(container.current.entries());
+    batchReconcilerUpdates(module, () => {
+      pendingContainers.forEach(([, currentContainer]) => {
+        requestReconcilerUnmountContainer(module, currentContainer);
+      });
     });
-    container.current.clear();
+    flushReconcilerWork(module);
+
+    pendingContainers.forEach(([key, currentContainer]) => {
+      if (container.current.get(key) === currentContainer) {
+        currentContainer.containerInfo.delete();
+        container.current.delete(key);
+      }
+    });
   }, []);
 
   useLayoutEffect(() => {
@@ -100,6 +153,9 @@ export const CustomLayout: React.FC<CustomLayoutProps> = (props: PropsWithChildr
     // eslint-disable-next-line no-undef
     console.log('update props', props, table);
 
+    if (!reconcilerReady) {
+      return;
+    }
     table?.checkReactCustomLayout(); // init reactCustomLayout component
     table?.reactCustomLayout?.setReactRemoveAllGraphic(componentId, removeAllContainer, isHeaderCustomLayout); // set customLayout function
 
@@ -121,6 +177,10 @@ export const CustomLayout: React.FC<CustomLayoutProps> = (props: PropsWithChildr
       ); // update customLayout function
       // update all container
       container.current.forEach((value, key) => {
+        const module = reconcilerModule.current;
+        if (!module) {
+          return;
+        }
         const [col, row] = key.split('-').map(Number);
         // const width = table.getColWidth(col); // to be fixed: may be merge cell
         // const height = table.getRowHeight(row); // to be fixed: may be merge cell
@@ -130,7 +190,7 @@ export const CustomLayout: React.FC<CustomLayoutProps> = (props: PropsWithChildr
           col,
           row,
           dataValue: table.getCellOriginValue(col, row),
-          value: table.getCellValue(col, row) || '',
+          value: table.getCellValue(col, row),
           rect: {
             left: 0,
             top: 0,
@@ -143,7 +203,7 @@ export const CustomLayout: React.FC<CustomLayoutProps> = (props: PropsWithChildr
         };
         // update element in container
         const group = currentContainer.containerInfo;
-        reconcilorUpdateContainer(children, currentContainer, args);
+        reconcilorUpdateContainer(module, children, currentContainer, args);
         // reconcilor.updateContainer(React.cloneElement(children, { ...args }), currentContainer, null);
         table.scenegraph.updateNextFrame();
       });
@@ -153,8 +213,25 @@ export const CustomLayout: React.FC<CustomLayoutProps> = (props: PropsWithChildr
   return null;
 };
 
-function reconcilorUpdateContainer(children: ReactElement, currentContainer: any, args: any) {
-  reconcilor.updateContainer(React.cloneElement(children, { ...args }), currentContainer, null);
+type ReconcilerModule = {
+  reconcilor: any;
+  createReconcilerContainer: (
+    container: any,
+    identifierPrefix?: string,
+    reportError?: (type: ReconcilerErrorType, error: unknown) => void
+  ) => FiberRoot;
+};
+
+function reconcilorUpdateContainer(module: ReconcilerModule, children: ReactElement, currentContainer: any, args: any) {
+  const element = React.cloneElement(children, { ...args });
+  const { reconcilor } = module;
+  const updateContainerSync = (reconcilor as any).updateContainerSync;
+  if (typeof updateContainerSync === 'function') {
+    updateContainerSync(element, currentContainer, null);
+    flushReconcilerWork(module);
+    return;
+  }
+  reconcilor.updateContainer(element, currentContainer, null);
   // group = group.firstChild;
   // if (isReactElement(group.attribute.html?.dom)) {
   //   const div = document.createElement('div');
@@ -164,6 +241,60 @@ function reconcilorUpdateContainer(children: ReactElement, currentContainer: any
   //   // debugger;
   //   // group.html.dom = div;
   // }
+}
+
+function reconcilorUnmountContainer(module: ReconcilerModule, currentContainer: any): boolean {
+  requestReconcilerUnmountContainer(module, currentContainer);
+  return flushReconcilerWork(module);
+}
+
+function requestReconcilerUnmountContainer(module: ReconcilerModule, currentContainer: any) {
+  const { reconcilor } = module;
+  const updateContainerSync = (reconcilor as any).updateContainerSync;
+  if (typeof updateContainerSync === 'function') {
+    try {
+      updateContainerSync(null, currentContainer, null);
+      return;
+    } catch {
+      reconcilor.updateContainer(null, currentContainer, null);
+      return;
+    }
+  }
+  reconcilor.updateContainer(null, currentContainer, null);
+}
+
+function flushReconcilerWork(module: ReconcilerModule): boolean {
+  const { reconcilor } = module;
+  const flushSyncWork = (reconcilor as any).flushSyncWork;
+  if (typeof flushSyncWork === 'function') {
+    try {
+      const result = flushSyncWork();
+      if (result === true) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
+
+  const flushPassiveEffects = (reconcilor as any).flushPassiveEffects;
+  if (typeof flushPassiveEffects === 'function') {
+    try {
+      flushPassiveEffects();
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+function batchReconcilerUpdates(module: ReconcilerModule, callback: () => void) {
+  const batchedUpdates = (module.reconcilor as any).batchedUpdates;
+  if (typeof batchedUpdates === 'function') {
+    batchedUpdates(callback);
+  } else {
+    callback();
+  }
 }
 
 function getCellRect(col: number, row: number, table: any) {

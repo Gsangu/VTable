@@ -69,6 +69,10 @@ export interface TableEvents {
    */
   CONTEXTMENU_CANVAS: 'contextmenu_canvas';
   /**
+   * 右键菜单项点击事件
+   */
+  CONTEXT_MENU_CLICK: 'context_menu_click';
+  /**
    * 列宽调整事件
    */
   RESIZE_COLUMN: 'resize_column';
@@ -84,6 +88,14 @@ export interface TableEvents {
    * 行高调整结束事件
    */
   RESIZE_ROW_END: 'resize_row_end';
+  /**
+   * 合并单元格事件（mergeCells 调用成功后触发）
+   */
+  MERGE_CELLS: 'merge_cells';
+  /**
+   * 取消合并单元格事件（unmergeCells 调用后触发）
+   */
+  UNMERGE_CELLS: 'unmerge_cells';
   /**
    * 拖拽表头移动位置的事件
    */
@@ -190,6 +202,8 @@ export interface TableEvents {
 
   /** 编辑单元格 */
   CHANGE_CELL_VALUE: 'change_cell_value';
+  /** 批量编辑单元格 */
+  CHANGE_CELL_VALUES: 'change_cell_values';
 
   /**
    * 鼠标按下填充柄事件
@@ -277,10 +291,13 @@ export const TABLE_EVENT_TYPE: TableEvents = {
   MOUSELEAVE_CELL: 'mouseleave_cell',
   CONTEXTMENU_CELL: 'contextmenu_cell',
   CONTEXTMENU_CANVAS: 'contextmenu_canvas',
+  CONTEXT_MENU_CLICK: 'context_menu_click',
   RESIZE_COLUMN: 'resize_column',
   RESIZE_COLUMN_END: 'resize_column_end',
   RESIZE_ROW: 'resize_row',
   RESIZE_ROW_END: 'resize_row_end',
+  MERGE_CELLS: 'merge_cells',
+  UNMERGE_CELLS: 'unmerge_cells',
   CHANGE_HEADER_POSITION_START: 'change_header_position_start',
   CHANGE_HEADER_POSITION: 'change_header_position',
   CHANGING_HEADER_POSITION: 'changing_header_position',
@@ -330,6 +347,7 @@ export const TABLE_EVENT_TYPE: TableEvents = {
   AFTER_UPDATE_CELL_CONTENT_WIDTH: 'after_update_cell_content_width',
   AFTER_UPDATE_SELECT_BORDER_HEIGHT: 'after_update_select_border_height',
   CHANGE_CELL_VALUE: 'change_cell_value',
+  CHANGE_CELL_VALUES: 'change_cell_values',
   DRAG_FILL_HANDLE_END: 'drag_fill_handle_end',
   MOUSEDOWN_FILL_HANDLE: 'mousedown_fill_handle',
   DBLCLICK_FILL_HANDLE: 'dblclick_fill_handle',

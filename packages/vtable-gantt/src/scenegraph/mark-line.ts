@@ -1,8 +1,17 @@
-import { computeCountToTimeScale, createDateAtMidnight } from '../tools/util';
-import { DayTimes } from '../gantt-helper';
-//import type { IMarkLine } from '../ts-types';
+import { createDateAtMidnight } from '../tools/util';
+import type { ILineStyle, IMarkLine, IMarkLineStyleArgumentType } from '../ts-types';
 import type { Scenegraph } from './scenegraph';
 import { Group, createLine, Text } from '@visactor/vtable/es/vrender';
+
+function resolveMarkLineStyle(line: IMarkLine, args: IMarkLineStyleArgumentType): ILineStyle {
+  const style = typeof line.style === 'function' ? line.style(args) : line.style;
+  const lineWidth = typeof style?.lineWidth === 'function' ? style.lineWidth(args) : style?.lineWidth;
+  return {
+    lineColor: style?.lineColor || 'red',
+    lineWidth: lineWidth ?? 1,
+    lineDash: style?.lineDash
+  };
+}
 
 export class MarkLine {
   _scene: Scenegraph;
@@ -53,25 +62,37 @@ export class MarkLine {
     const minDate = this._scene._gantt.parsedOptions.minDate;
     minDate &&
       markLine.forEach(line => {
-        const style = line.style;
         const contentStyle = line.contentStyle || {};
         const date = this._scene._gantt.parsedOptions.timeScaleIncludeHour
           ? createDateAtMidnight(line.date)
           : createDateAtMidnight(line.date, true);
-        const { unit, step } = this._scene._gantt.parsedOptions.reverseSortedTimelineScales[0];
-        const unitCount = computeCountToTimeScale(date, minDate, unit, step);
-        let positionOffset = 0;
-        if (line.position === 'right') {
-          positionOffset = 1;
-        } else if (line.position === 'middle') {
-          positionOffset = 0.5;
-        } else if (line.position === 'date') {
-          const date = createDateAtMidnight(line.date);
-          const unitCount = computeCountToTimeScale(date, minDate, unit, step);
-          const cellIndex = Math.floor(unitCount);
-          positionOffset = unitCount - cellIndex;
+        const dateTime = date.getTime();
+        if (
+          dateTime < this._scene._gantt.parsedOptions._minDateTime ||
+          dateTime > this._scene._gantt.parsedOptions._maxDateTime
+        ) {
+          return;
         }
-        const dateX = this._scene._gantt.parsedOptions.timelineColWidth * (Math.floor(unitCount) + positionOffset);
+        const cellIndex = this._scene._gantt.getDateIndexByTime(dateTime);
+        const cellStartX = cellIndex >= 1 ? this._scene._gantt.getDateColsWidth(0, cellIndex - 1) : 0;
+        const cellWidth = this._scene._gantt.getDateColWidth(cellIndex);
+        let dateX = cellStartX;
+        if (line.position === 'date') {
+          dateX = this._scene._gantt.getXByTime(dateTime);
+        } else if (line.position === 'right') {
+          dateX = cellStartX + cellWidth;
+        } else if (line.position === 'middle') {
+          dateX = cellStartX + cellWidth / 2;
+        }
+        const style = resolveMarkLineStyle(line, {
+          date,
+          dateIndex: cellIndex,
+          dateX,
+          cellStartX,
+          cellWidth,
+          timelineColWidth: this._scene._gantt.parsedOptions.timelineColWidth,
+          millisecondsPerPixel: this._scene._gantt.getCurrentMillisecondsPerPixel()
+        });
         const markLineGroup = new Group({
           pickable: false,
           x: dateX - this.markLineContainerWidth / 2,
@@ -94,7 +115,7 @@ export class MarkLine {
         });
         markLineGroup.appendChild(lineObj);
         if (line.content) {
-          const textMaxLineWidth = this._scene._gantt.parsedOptions.timelineColWidth;
+          const textMaxLineWidth = Math.max(this._scene._gantt.getDateColWidth(cellIndex), 1);
           const textContainerHeight = contentStyle.lineHeight || 18;
           // 创建内容区
           const textGroup = new Group({
@@ -108,7 +129,7 @@ export class MarkLine {
             cornerRadius: contentStyle.cornerRadius || [0, 2, 2, 0]
           });
           textGroup.name = 'mark-line-content';
-          textGroup.data = line;
+          (textGroup as any).data = line;
           markLineGroup.appendChild(textGroup);
           // 创建内容
           const text = new Text({
@@ -124,7 +145,7 @@ export class MarkLine {
               dx: textMaxLineWidth / 4,
               dy: -textContainerHeight / 4
             }
-          });
+          } as any);
           textGroup.appendChild(text);
         }
       });

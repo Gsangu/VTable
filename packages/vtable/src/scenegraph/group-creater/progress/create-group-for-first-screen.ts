@@ -6,6 +6,32 @@ import { computeRowsHeight } from '../../layout/compute-row-height';
 import { createColGroup } from '../column';
 import type { SceneProxy } from './proxy';
 
+function fillVisibleBodyRows(proxy: SceneProxy, distRow: number): number {
+  const { table } = proxy;
+  const bodyBottomRow = table.rowCount - 1 - table.bottomFrozenRowCount;
+  const visibleBodyHeight = table.tableNoFrameHeight - table.getFrozenRowsHeight() - table.getBottomFrozenRowsHeight();
+  let targetRow = distRow;
+
+  while (targetRow < bodyBottomRow && table.getRowsHeight(table.frozenRowCount, targetRow) < visibleBodyHeight) {
+    const nextRow = targetRow + 1;
+    if (!table.internalProps._heightResizedRowMap.has(nextRow)) {
+      computeRowsHeight(table, nextRow, nextRow, false);
+    }
+    targetRow = nextRow;
+  }
+
+  return targetRow;
+}
+
+function syncVisibleBodyRows(proxy: SceneProxy, targetRow: number) {
+  if (targetRow <= proxy.totalRow) {
+    return;
+  }
+
+  proxy.totalRow = targetRow;
+  proxy.totalActualBodyRowCount = Math.max(proxy.totalActualBodyRowCount, targetRow - proxy.bodyTopRow + 1);
+}
+
 export function createGroupForFirstScreen(
   cornerHeaderGroup: Group,
   colHeaderGroup: Group,
@@ -50,20 +76,38 @@ export function createGroupForFirstScreen(
   } else {
     distRow = Math.min(proxy.firstScreenRowLimit - 1, table.rowCount - 1);
   }
-  if (table.internalProps._widthResizedColMap.size === 0) {
-    // compute colums width in first screen
-    computeColsWidth(table, 0, distColForCompute ?? distCol);
+  let bodyDistRow = Math.min(proxy.bodyBottomRow, distRow - table.bottomFrozenRowCount);
+  const colEndForCompute = distColForCompute ?? distCol;
+  let hasUnresizedColumns = false;
+  for (let col = 0; col <= colEndForCompute; col++) {
+    if (!table.internalProps._widthResizedColMap.has(col)) {
+      hasUnresizedColumns = true;
+      break;
+    }
+  }
+  if (hasUnresizedColumns) {
+    // Compute widths for new columns while preserving manually resized columns.
+    computeColsWidth(table, 0, colEndForCompute);
   }
 
-  if (table.internalProps._heightResizedRowMap.size === 0) {
+  const rowEndForCompute =
+    table.options.canvasHeight === 'auto' || table.options.customConfig?.forceComputeAllRowHeight
+      ? table.rowCount - 1
+      : distRowForCompute ?? distRow;
+  let hasUnresizedRows = false;
+  for (let row = 0; row <= rowEndForCompute; row++) {
+    if (!table.internalProps._heightResizedRowMap.has(row)) {
+      hasUnresizedRows = true;
+      break;
+    }
+  }
+  if (hasUnresizedRows) {
     // compute rows height in first screen
-    computeRowsHeight(
-      table,
-      0,
-      table.options.canvasHeight === 'auto' || table.options.customConfig?.forceComputeAllRowHeight
-        ? table.rowCount - 1
-        : distRowForCompute ?? distRow
-    ); //如果配置了 canvasHeight为 'auto'， 则一次性将所有行高都计算出来才能满足后续赋值表格高度的使用
+    computeRowsHeight(table, 0, rowEndForCompute); //如果配置了 canvasHeight为 'auto'， 则一次性将所有行高都计算出来才能满足后续赋值表格高度的使用
+  }
+  if (table.heightMode === 'autoHeight') {
+    bodyDistRow = fillVisibleBodyRows(proxy, bodyDistRow);
+    syncVisibleBodyRows(proxy, bodyDistRow);
   }
 
   if (distCol < table.colCount - table.rightFrozenColCount) {
@@ -128,7 +172,7 @@ export function createGroupForFirstScreen(
         table.leftRowSeriesNumberCount - 1, // colEnd
         table.frozenRowCount, // rowStart
         // Math.min(proxy.firstScreenRowLimit, table.rowCount - 1 - table.bottomFrozenRowCount), // rowEnd
-        distRow - table.bottomFrozenRowCount,
+        bodyDistRow,
         'rowHeader', // isHeader
         table
       );
@@ -142,7 +186,7 @@ export function createGroupForFirstScreen(
         Math.min(table.frozenColCount - 1, table.rowHeaderLevelCount + table.leftRowSeriesNumberCount - 1), // colEnd
         table.frozenRowCount, // rowStart
         // Math.min(proxy.firstScreenRowLimit, table.rowCount - 1 - table.bottomFrozenRowCount), // rowEnd
-        distRow - table.bottomFrozenRowCount,
+        bodyDistRow,
         'rowHeader', // isHeader
         table
       );
@@ -156,7 +200,7 @@ export function createGroupForFirstScreen(
         table.frozenColCount - 1, // colEnd
         table.frozenRowCount, // rowStart
         // Math.min(proxy.firstScreenRowLimit, table.rowCount - 1 - table.bottomFrozenRowCount), // rowEnd
-        distRow - table.bottomFrozenRowCount,
+        bodyDistRow,
         'body',
         table
       );
@@ -275,7 +319,7 @@ export function createGroupForFirstScreen(
       table.colCount - 1, // colEnd
       table.frozenRowCount, // rowStart
       // Math.min(proxy.firstScreenRowLimit, table.rowCount - 1 - table.bottomFrozenRowCount), // rowEnd
-      distRow - table.bottomFrozenRowCount,
+      bodyDistRow,
       table.isPivotChart() ? 'rowHeader' : 'body', // isHeader
       table
     );
@@ -307,7 +351,7 @@ export function createGroupForFirstScreen(
       distCol - table.rightFrozenColCount,
       table.frozenRowCount, // rowStart
       // Math.min(proxy.firstScreenRowLimit, table.rowCount - 1 - table.bottomFrozenRowCount), // rowEnd
-      distRow - table.bottomFrozenRowCount,
+      bodyDistRow,
       'body', // isHeader
       table
     );

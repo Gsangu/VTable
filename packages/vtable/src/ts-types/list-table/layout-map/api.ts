@@ -23,7 +23,8 @@ import type {
   IRowSeriesNumber,
   SortOption,
   FieldGetter,
-  BaseCellInfo
+  ColumnTypeOption,
+  HeaderTypeOption
 } from '../../';
 import type { Aggregator } from '../../dataset/aggregation';
 import type { BaseTableAPI } from '../../base-table';
@@ -39,6 +40,7 @@ export type {
   LinkColumnDefine,
   ChartColumnDefine,
   ImageColumnDefine,
+  AudioColumnDefine,
   SparklineColumnDefine,
   ProgressbarColumnDefine,
   TextColumnDefine,
@@ -62,7 +64,7 @@ export interface HeaderData extends WidthData {
   field: FieldDef;
   fieldFormat?: FieldFormat;
   style?: HeaderStyleOption | ColumnStyle | null | undefined;
-  headerType: 'text' | 'link' | 'image' | 'video' | 'checkbox'; // headerType.BaseHeader;
+  headerType: HeaderTypeOption | ((args: CellInfo) => HeaderTypeOption); // headerType.BaseHeader;
   define: ColumnDefine;
   // sortIconPosition?: RectProps;
   // freezeIconPosition?: RectProps;
@@ -120,7 +122,7 @@ export interface ColumnData extends WidthData {
     | (string | ColumnIconOption)[]
     | ((args: CellInfo) => undefined | string | ColumnIconOption | (string | ColumnIconOption)[]);
 
-  cellType: 'text' | 'link' | 'image' | 'video' | 'sparkline' | 'progressbar' | 'chart' | 'checkbox' | 'radio';
+  cellType: ColumnTypeOption | ((arg0: CellInfo) => ColumnTypeOption);
   /** 如果是绘制图表库组件的图表类型 需要将注入的组件名称 写到chartType */
   chartModule?: string;
   /** 如果是绘制图表库组件的图表类型 统一图表配置chartSpec */
@@ -152,7 +154,7 @@ export interface IndicatorData extends WidthData {
   indicatorKey: string;
   // fieldKey: FieldKeyDef;
   fieldFormat?: FieldFormat;
-  cellType: 'text' | 'link' | 'image' | 'video' | 'sparkline' | 'progressbar' | 'chart'; //BaseColumn<T, any>;
+  cellType: 'text' | 'link' | 'image' | 'video' | 'audio' | 'sparkline' | 'progressbar' | 'chart'; //BaseColumn<T, any>;
   chartModule?: string;
   chartSpec?: any | ((arg0: CustomRenderFunctionArg) => any);
   chartInstance?: any;
@@ -190,8 +192,8 @@ export interface SeriesNumberColumnData extends WidthData {
     | (string | ColumnIconOption)[]
     | ((args: CellInfo) => undefined | string | ColumnIconOption | (string | ColumnIconOption)[]);
   headerIcon?: string | ColumnIconOption | (string | ColumnIconOption)[];
-  cellType: 'text' | 'link' | 'image' | 'video' | 'checkbox' | 'radio';
-  headerType: 'text' | 'link' | 'image' | 'video' | 'checkbox';
+  cellType: 'text' | 'link' | 'image' | 'video' | 'audio' | 'checkbox' | 'radio';
+  headerType: 'text' | 'link' | 'image' | 'video' | 'audio' | 'checkbox';
   style: ColumnStyleOption | null | undefined;
   define: IRowSeriesNumber;
   isChildNode?: false;

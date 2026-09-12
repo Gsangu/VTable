@@ -105,7 +105,7 @@ import type { EditManager } from '../edit/edit-manager';
 import type { TableAnimationManager } from '../core/animation';
 import type { CustomCellStylePlugin } from '../plugins/custom-cell-style';
 import type { IVTablePlugin } from '../plugins/interface';
-import type { FederatedPointerEvent } from '@src/vrender';
+import type { FederatedPointerEvent, IApp, IStage } from '@src/vrender';
 
 export interface IBaseTableProtected {
   element: HTMLElement;
@@ -317,8 +317,48 @@ export interface BaseTableConstructorOptions {
   bottomFrozenRowCount?: number;
   /** 最大冻结宽度，固定值 or 百分比。默认为'80%' */
   maxFrozenWidth?: number | string;
+  /**
+   * 右侧最大冻结宽度，固定值 or 百分比。
+   *
+   * - 仅在 `rightFrozenColCount > 0` 时有意义
+   * - 默认与 `maxFrozenWidth` 保持一致（便于左右冻结行为对齐）
+   * - 当 `scrollRightFrozenCols` 开启时，该值决定右侧冻结区域的“视口宽度上限”
+   */
+  maxRightFrozenWidth?: number | string;
   /** 超过最大冻结宽度后是否全部解冻，默认true */
   unfreezeAllOnExceedsMaxWidth?: boolean;
+  /**
+   * 是否允许左侧冻结区域内部横向滚动。
+   *
+   * 当左侧冻结列的“内容总宽度”超过 `maxFrozenWidth` 时：
+   * - `false`（默认）：冻结列会按 `unfreezeAllOnExceedsMaxWidth` 的策略自动解冻以适配视口
+   * - `true`：保留全部冻结列，并在左侧冻结区域内通过触摸板横向滚动/滚动条查看超出部分
+   *
+   * 该能力会引入一个独立的滚动域（frozen），对应 `getFrozenColsScrollLeft/getFrozenColsOffset`。
+   */
+  scrollFrozenCols?: boolean;
+  /**
+   * 是否允许右侧冻结区域内部横向滚动。
+   *
+   * 当右侧冻结列的“内容总宽度”超过 `maxRightFrozenWidth` 时：
+   * - `false`（默认）：右侧冻结区域宽度等于内容宽度（不会出现内部横向滚动）
+   * - `true`：保留全部右侧冻结列，并在右侧冻结区域内通过触摸板横向滚动/滚动条查看超出部分
+   *
+   * 该能力会引入一个独立的滚动域（rightFrozen），对应 `getRightFrozenColsScrollLeft/getRightFrozenColsOffset`。
+   */
+  scrollRightFrozenCols?: boolean;
+
+  /**
+   * 冻结区域滚动到边界时，是否自动“透传”给 body 横向滚动。
+   *
+   * - `false`（默认）：在冻结区域内滚动时，即使滚动到头/尾也不会触发 body 横向滚动
+   * - `true`：当冻结区域无法继续滚动时，将剩余滚动意图交由 body 横向滚动处理
+   *
+   * 说明：
+   * - 仅对鼠标滚轮/触摸板触发的横向滚动（wheel）生效
+   * - 仅在 `scrollFrozenCols` / `scrollRightFrozenCols` 开启且对应区域存在溢出（offset > 0）时才有意义
+   */
+  scrollFrozenColsPassThroughToBody?: boolean;
 
   // /** 待实现 TODO */
   // frozenRowCount?: number;
@@ -514,6 +554,12 @@ export interface BaseTableConstructorOptions {
 
   legends?: ITableLegendOption | ITableLegendOption[];
   title?: ITitle;
+  /**
+   * 标题与图例的布局计算顺序，仅影响两者的布局与可用绘制区域的缩减顺序。
+   *
+   * 默认不配置时等价于 ['legend', 'title']，与现有行为保持一致。
+   */
+  componentLayoutOrder?: ('legend' | 'title')[];
   emptyTip?: true | IEmptyTip;
   /** 是否开启图表异步渲染 */
   renderChartAsync?: boolean;
@@ -524,6 +570,10 @@ export interface BaseTableConstructorOptions {
 
   // #region for nodejs
   mode?: 'node' | 'browser';
+  /**
+   * Node env params are passed to acquireSharedVRenderApp({ env: 'node', envParams: modeParams }).
+   * Release validation should use Node 20.19.6 or another version matching the canvas native binding ABI.
+   */
   modeParams?: any;
   canvasWidth?: number | 'auto';
   canvasHeight?: number | 'auto';
@@ -546,6 +596,21 @@ export interface BaseTableConstructorOptions {
 
   canvas?: HTMLCanvasElement;
   viewBox?: IBoundsLike;
+  /**
+   * Advanced VRender app provider. Normal VTable users do not need to pass an app.
+   * VTable creates and releases the stage it creates from this app, but app ownership remains with the caller.
+   */
+  vRenderApp?: IApp;
+  /**
+   * Scope for VTable-managed shared VRender apps. Tables with the same scope, mode, and envParams identity share a ref-counted app.
+   */
+  vRenderAppScope?: string;
+  /**
+   * Advanced borrowed VRender stage. When supplied, VTable only mounts its table group and will not release the stage or app.
+   * The caller owns the stage lifecycle.
+   */
+  stage?: IStage;
+  /** 具体同 VChart 的 Option 配置。会与表格中标准的 chart Option 配置进行合并，后在图表中使用。 */
   chartOption?: any;
   disableInteraction?: boolean;
 
@@ -592,6 +657,12 @@ export interface BaseTableConstructorOptions {
 
     // 图片资源请求时是否使用anonymous模式
     imageAnonymous?: boolean;
+    // 视频单元格首帧绘制后是否替换为canvas快照并释放video资源
+    videoFirstFrameSnapshot?: boolean;
+    // 视频单元格等待首帧的超时时间，单位ms，默认8000
+    videoFirstFrameTimeout?: number;
+    // 视频单元格首帧快照canvas的最大边长，默认512
+    videoFirstFrameMaxCanvasSize?: number;
 
     // 滚动到边界是否继续触发滚动事件
     scrollEventAlwaysTrigger?: boolean;
@@ -607,11 +678,18 @@ export interface BaseTableConstructorOptions {
     /** 强制计算所有行高，用于某些场景下，如vtable-gantt中，需要一次性计算所有行高 */
     forceComputeAllRowHeight?: boolean;
 
+    /** 多行合并行高自动计算时单行最小行高，用在大量行合并的情况下，避免行高自动计算过小导致内容无法显示 */
+    minSingleRowHeight?: number;
+
     /** 是否取消当前单元格选中状态的判断钩子，用在table-group文件的pointertap事件中，当点击空白区域时，取消选中状态 */
     cancelSelectCellHook?: (e: FederatedPointerEvent) => boolean;
 
     /** 当编辑器没有退出情况时，可继续选中其他单元格，比如在vtable-sheet中，当编辑器没有退出情况时，可继续选中其他单元格 */
     selectCellWhenCellEditorNotExists?: boolean;
+
+    /**当点击到非表格dom上时，正常会退出编辑或者取消选中或者释放图表的交互状态，
+     * 如果需要继续保留这些状态，不想被取消，不想退出编辑或者取消选中或者释放图表的交互状态，可以配置这个钩子返回true */
+    shouldTreatAsClickOnTable?: (e: MouseEvent) => boolean;
   }; // 部分特殊配置，兼容xTable等作用
 
   animationAppear?: boolean | IAnimationAppear;
@@ -619,7 +697,11 @@ export interface BaseTableConstructorOptions {
   renderOption?: any;
 
   formatCopyValue?: (value: string) => string;
-  customComputeRowHeight?: (computeArgs: { row: number; table: BaseTableAPI }) => number | 'auto' | undefined;
+  customComputeRowHeight?: (computeArgs: {
+    row: number;
+    table: BaseTableAPI;
+    realHeight?: number;
+  }) => number | 'auto' | undefined;
   /** 当表格出现抖动情况，请排查是否上层dom容器的宽高是小数引起的。如果不能保证是整数，请配置这个配置项为true */
   tableSizeAntiJitter?: boolean;
 
@@ -717,6 +799,14 @@ export interface BaseTableAPI {
   tableX: number;
   /** 表格偏移像素值 垂直方向 */
   tableY: number;
+  /** 表格左边框宽度 包括lineWidth和shadowBlur*/
+  _tableBorderWidth_left: number;
+  /** 表格右边框宽度 包括lineWidth和shadowBlur*/
+  _tableBorderWidth_right: number;
+  /** 表格上边框宽度 包括lineWidth和shadowBlur*/
+  _tableBorderWidth_top: number;
+  /** 表格下边框宽度 包括lineWidth和shadowBlur*/
+  _tableBorderWidth_bottom: number;
   /** 表格宽度模式 */
   widthMode: WidthModeDef;
   /** 表格宽度模式 */
@@ -832,8 +922,14 @@ export interface BaseTableAPI {
 
   getFrozenRowsHeight: () => number;
   getFrozenColsWidth: () => number;
+  getFrozenColsContentWidth: () => number;
+  getFrozenColsOffset: () => number;
+  getFrozenColsScrollLeft: () => number;
   getBottomFrozenRowsHeight: () => number;
   getRightFrozenColsWidth: () => number;
+  getRightFrozenColsContentWidth: () => number;
+  getRightFrozenColsOffset: () => number;
+  getRightFrozenColsScrollLeft: () => number;
   selectCell: (
     col: number,
     row: number,
@@ -860,7 +956,7 @@ export interface BaseTableAPI {
    * 根据数据源的index 获取显示到表格中的index 行号或者列号（与转置相关）。注：ListTable特有接口
    * @param recordIndex
    */
-  getTableIndexByRecordIndex: (recordIndex: number) => number;
+  getTableIndexByRecordIndex: (recordIndex: number | number[]) => number;
   /**
    * 根据数据源的field 获取显示到表格中的index 行号或者列号（与转置相关）。注：ListTable特有接口
    * @param recordIndex
@@ -872,7 +968,7 @@ export interface BaseTableAPI {
    * @param recordIndex
    * @returns
    */
-  getCellAddrByFieldRecord: (field: FieldDef, recordIndex: number) => CellAddress;
+  getCellAddrByFieldRecord: (field: FieldDef, recordIndex: number | number[]) => CellAddress;
   getRecordShowIndexByCell: (col: number, row: number) => number;
   getRecordStartRowByRecordIndex: (index: number) => number;
 
@@ -932,6 +1028,11 @@ export interface BaseTableAPI {
   getHierarchyState: (col: number, row: number) => HierarchyState | null;
 
   _canDragHeaderPosition: (col: number, row: number) => boolean;
+  changeHeaderPosition: (args: {
+    source: CellAddress;
+    target: CellAddress;
+    movingColumnOrRow?: 'column' | 'row';
+  }) => boolean;
 
   isHeader: (col: number, row: number) => boolean;
 
@@ -1072,6 +1173,9 @@ export interface BaseTableAPI {
   _getComputedFrozenColCount: (frozenColCount: number) => number;
   isColumnSelected: (col: number) => boolean;
   isRowSelected: (row: number) => boolean;
+  updateCellContentRanges: (ranges: CellRange[]) => void;
+  updateCellContent: (col: number, row: number) => void;
+  updateCellContentRange: (startCol: number, startRow: number, endCol: number, endRow: number) => void;
 }
 export interface ListTableProtected extends IBaseTableProtected {
   /** 表格数据 */

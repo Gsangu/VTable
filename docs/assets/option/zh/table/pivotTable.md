@@ -229,10 +229,14 @@ export interface Total {
   showSubTotals: boolean;
   // 小计汇总维度定义
   subTotalsDimensions?: string[];
+  // 总计中保留的下级维度，用于在总计区域内继续按维度分组；仅支持当前行/列方向首层之后的维度
+  grandTotalDimensions?: string[];
   // 默认'总计'
   grandTotalLabel?: string;
   // 默认'小计'
   subTotalLabel?: string;
+  // 当在透视表中禁用小计时，此选项允许在折叠的树节点上显示聚合值。默认值为 false
+  showSubTotalsOnTreeNode?: boolean;
 }
 ```
 
@@ -272,9 +276,10 @@ export interface CalculateddFieldRule {
   calculateFun?: (dependFieldsValue: any) => any;
 }
 ```
+
 ### updateAggregationOnEditCell (boolean)
 
-是否在修改单元格后更新小计和总计。默认值为false.
+是否在修改单元格后更新小计和总计。默认值为 false.
 
 具体情况请参考[demo](../demo/data-analysis/pivot-analysis-updateTotalData)
 
@@ -450,6 +455,7 @@ export interface IIndicatorHeaderNode {
 ## columnWidthConfigForRowHeader(Array)
 
 依据行维度信息设置行表头列宽, 设置示例：
+
 ```
 columnWidthConfigForRowHeader": [
     {
@@ -463,5 +469,5 @@ columnWidthConfigForRowHeader": [
     }
   ]
 ```
-匹配关键是行维度的key：dimensionKey。
 
+匹配关键是行维度的 key：dimensionKey。

@@ -86,14 +86,8 @@ export class SheetTabEventHandler {
       showSnackbar('工作表名称已存在，请重新输入', 1300);
       return false;
     }
-    this.vTableSheet.getSheetManager().renameSheet(sheetKey, newTitle);
-    this.vTableSheet.workSheetInstances.get(sheetKey)?.setTitle(newTitle);
 
-    // 更新公式引擎中的工作表标题映射
-    this.vTableSheet.getFormulaManager().updateSheetTitle(sheetKey, newTitle);
-
-    this.vTableSheet.updateSheetTabs();
-    this.vTableSheet.updateSheetMenu();
+    this.vTableSheet.renameSheet(sheetKey, newTitle);
     return true;
   }
 
@@ -273,8 +267,8 @@ export class SheetTabEventHandler {
         '<path d="M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
         '</svg>';
       div.addEventListener('click', e => {
-        e.stopPropagation();
         this.vTableSheet.removeSheet(sheet.sheetKey);
+        e.stopPropagation();
       });
       li.addEventListener('click', () => this.vTableSheet.activateSheet(sheet.sheetKey));
       li.appendChild(div);
@@ -294,6 +288,9 @@ export class SheetTabEventHandler {
    * 激活sheet菜单项并滚动到可见区域
    */
   activeSheetMenuItem(): void {
+    if (this.vTableSheet.getOptions()?.showSheetTab === false) {
+      return;
+    }
     const menuItems = this.vTableSheet
       .getSheetTabElement()
       ?.querySelectorAll('.vtable-sheet-main-menu-item') as NodeListOf<HTMLElement>;

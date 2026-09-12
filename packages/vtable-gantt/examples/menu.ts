@@ -8,6 +8,10 @@ export const menus = [
   },
   {
     path: 'gantt',
+    name: 'gantt-baseline'
+  },
+  {
+    path: 'gantt',
     name: 'gantt-zoom'
   },
   {
@@ -166,6 +170,18 @@ export const menus = [
   {
     path: 'gantt',
     name: 'project-sub-tasks-inline'
+  },
+  {
+    path: 'gantt',
+    name: 'gantt-locate-taskbar'
+  },
+  {
+    path: 'gantt',
+    name: 'gantt-issue-5162-sort-drag'
+  },
+  {
+    path: 'gantt',
+    name: 'issue-4778-taskbar-relative-rect'
   }
   //   ]
   // }

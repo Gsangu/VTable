@@ -70,12 +70,50 @@ export function syncTreeChangeFromTable(gantt: Gantt) {
   });
 }
 export function syncSortFromTable(gantt: Gantt) {
-  gantt.taskListTableInstance?.on('after_sort', (args: any) => {
+  const taskListTableInstance = gantt.taskListTableInstance as any;
+  if (!taskListTableInstance || taskListTableInstance._vtableGanttSortSyncPatched) {
+    return;
+  }
+
+  const syncTaskBarsAfterSort = (attempt: number = 0) => {
     gantt.scenegraph.refreshTaskBars();
+
+    const taskCount = Math.min(gantt.itemCount ?? 0, 10);
+    const taskKeyField = gantt.parsedOptions.taskKeyField;
+    let taskBarsSynced = true;
+    for (let index = 0; index < taskCount; index++) {
+      const taskBarNode = gantt.scenegraph.taskBar.getTaskBarNodeByIndex(index);
+      const visibleRecord = gantt.getRecordByIndex(index);
+      if (taskBarNode && taskBarNode.record?.[taskKeyField] !== visibleRecord?.[taskKeyField]) {
+        taskBarsSynced = false;
+        break;
+      }
+    }
+
+    if (!taskBarsSynced && attempt < 10) {
+      setTimeout(() => syncTaskBarsAfterSort(attempt + 1), 16);
+      return;
+    }
+
     const left = gantt.stateManager.scroll.horizontalBarPos;
     const top = gantt.stateManager.scroll.verticalBarPos;
     gantt.scenegraph.setX(-left);
     gantt.scenegraph.setY(-top);
+  };
+
+  const originalUpdateSortState = taskListTableInstance.updateSortState?.bind(taskListTableInstance);
+  if (originalUpdateSortState) {
+    taskListTableInstance.updateSortState = (...args: any[]) => {
+      const result = originalUpdateSortState(...args);
+      syncTaskBarsAfterSort();
+      return result;
+    };
+  }
+
+  taskListTableInstance._vtableGanttSortSyncPatched = true;
+  taskListTableInstance.on('after_sort', () => {
+    // Retry until task bars bind the latest sorted records instead of stale pre-sort records.
+    syncTaskBarsAfterSort();
   });
 }
 export function syncDragOrderFromTable(gantt: Gantt) {
@@ -123,7 +161,8 @@ function _syncTableSize(gantt: Gantt) {
   const oldTaskTableWidth: number = gantt.taskTableWidth;
 
   gantt.taskTableWidth =
-    gantt.taskListTableInstance.getAllColsWidth() + gantt.parsedOptions.outerFrameStyle.borderLineWidth;
+    gantt.taskListTableInstance.getAllColsWidth() + (gantt.parsedOptions.outerFrameStyle.borderLineWidth as number);
+
   if (gantt.options?.taskListTable?.maxTableWidth) {
     gantt.taskTableWidth = Math.min(gantt.options?.taskListTable?.maxTableWidth, gantt.taskTableWidth);
   }
@@ -136,7 +175,7 @@ function _syncTableSize(gantt: Gantt) {
   gantt.element.style.left = gantt.taskTableWidth ? `${gantt.taskTableWidth}px` : '0px';
   gantt.taskListTableInstance.setCanvasSize(
     gantt.taskTableWidth,
-    gantt.tableNoFrameHeight + gantt.parsedOptions.outerFrameStyle.borderLineWidth * 2
+    gantt.tableNoFrameHeight + (gantt.parsedOptions.outerFrameStyle.borderLineWidth as number) * 2
   );
   gantt._updateSize();
   updateSplitLineAndResizeLine(gantt);

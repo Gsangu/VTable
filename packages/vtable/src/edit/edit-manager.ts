@@ -15,6 +15,7 @@ export class EditManager {
   editCell: { col: number; row: number };
   listenersId: number[] = [];
   beginTriggerEditCellMode: 'doubleclick' | 'click' | 'keydown';
+  /** 主要为了editor配置成函数的情况下，点击单元格流程造成接连调用getEditor()可能生成多个editor实例，所以需要缓存 */
   cacheLastSelectedCellEditor: Record<string, IEditor> = {};
   constructor(table: BaseTableAPI) {
     this.table = table;
@@ -113,20 +114,21 @@ export class EditManager {
           referencePosition.rect.height = rect.height + 1; // 这里的1应该根据单元格的borderWidth来定;
         }
         const editor = (this.table as ListTableAPI).getEditor(col, row);
-        setTimeout(() => {
-          // 为什么要加延时：因为这个SELECTED_CHANGED事件是pointerdown过来的，
-          // 如果这里不加延时，会导致鼠标抬起pointerup的时候将table.getElement()元素设置成焦点，从而导致编辑器失去焦点（因为prepareEdit只是将editor的element设置pointerEvents为none）
-          if (this.editingEditor !== editor) {
-            // 判断当前编辑器如果是当前需要准备的编辑器，则不进行准备编辑。这个是为了container-dom文件moveEditCellOnArrowKeys前后逻辑问题，前面有个selectCell会触发这个事件，后面有startEdit了，所以这个prepare就没必要了，触发的话反而有问题
-            editor.prepareEdit?.({
-              referencePosition,
-              container: this.table.getElement(),
-              table: this.table,
-              col,
-              row
-            });
-          }
-        }, 10);
+        editor &&
+          setTimeout(() => {
+            // 为什么要加延时：因为这个SELECTED_CHANGED事件是pointerdown过来的，
+            // 如果这里不加延时，会导致鼠标抬起pointerup的时候将table.getElement()元素设置成焦点，从而导致编辑器失去焦点（因为prepareEdit只是将editor的element设置pointerEvents为none）
+            if (editor && this.editingEditor !== editor) {
+              // 判断当前编辑器如果是当前需要准备的编辑器，则不进行准备编辑。这个是为了container-dom文件moveEditCellOnArrowKeys前后逻辑问题，前面有个selectCell会触发这个事件，后面有startEdit了，所以这个prepare就没必要了，触发的话反而有问题
+              editor.prepareEdit?.({
+                referencePosition,
+                container: this.table.getElement(),
+                table: this.table,
+                col,
+                row
+              });
+            }
+          }, 10);
       }
     });
     this.listenersId.push(doubleClickEventId, clickEventId, selectedChangedEventId);
@@ -147,7 +149,7 @@ export class EditManager {
     }
     const editor = (this.table as ListTableAPI).getEditor(col, row);
     if (editor) {
-      editElement && editor.setElement(editElement);
+      editElement && (editor as any).setElement?.(editElement);
       // //自定义内容单元格不允许编辑
       // if (this.table.getCustomRender(col, row) || this.table.getCustomLayout(col, row)) {
       //   console.warn("VTable Warn: cell has config custom render or layout, can't be edited");
@@ -190,7 +192,12 @@ export class EditManager {
 
       this.table._makeVisibleCell(col, row);
       this.editingEditor = editor;
-      const dataValue = isValid(value) ? value : this.table.getCellOriginValue(col, row);
+      const customMergeText = this.table.getCustomMerge(col, row)?.text;
+      const dataValue = isValid(value)
+        ? value
+        : isValid(customMergeText)
+        ? customMergeText
+        : this.table.getCellOriginValue(col, row);
       const rect = this.table.getCellRangeRelativeRect(this.table.getCellRange(col, row));
       const referencePosition = { rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height } };
 
@@ -260,7 +267,11 @@ export class EditManager {
     if (this.editingEditor.validateValue) {
       this.isValidatingValue = true;
       const newValue = this.editingEditor.getValue();
-      const oldValue = this.table.getCellOriginValue(this.editCell.col, this.editCell.row);
+      const customMergeText = this.table.getCustomMerge(this.editCell.col, this.editCell.row)?.text;
+      // 自定义合并单元格在编辑态看到的是 customMerge.text，因此校验 oldValue 也应以 text 为准，避免“校验基准值”与用户看到的不一致。
+      const oldValue = isValid(customMergeText)
+        ? customMergeText
+        : this.table.getCellOriginValue(this.editCell.col, this.editCell.row);
       const target = e?.target as HTMLElement | undefined;
 
       const maybePromiseOrValue = this.editingEditor.validateValue?.(
@@ -301,16 +312,21 @@ export class EditManager {
   doExit() {
     const changedValue = this.editingEditor.getValue?.();
     const range = this.table.getCellRange(this.editCell.col, this.editCell.row);
-    const changedValues: any[] = [];
-    for (let row = range.start.row; row <= range.end.row; row++) {
-      const rowChangedValues = [];
-      for (let col = range.start.col; col <= range.end.col; col++) {
-        rowChangedValues.push(changedValue);
-      }
-      changedValues.push(rowChangedValues);
-    }
     this.editingEditor.beforeEnd?.();
-    (this.table as ListTableAPI).changeCellValues(range.start.col, range.start.row, changedValues);
+    if (range.isCustom) {
+      // 自定义合并单元格的“数据落点”统一写到合并范围左上角单元格；展示值由 record-helper 同步到 customMergeCell.text。
+      (this.table as ListTableAPI).changeCellValue(range.start.col, range.start.row, changedValue);
+    } else {
+      const changedValues: any[] = [];
+      for (let row = range.start.row; row <= range.end.row; row++) {
+        const rowChangedValues = [];
+        for (let col = range.start.col; col <= range.end.col; col++) {
+          rowChangedValues.push(changedValue);
+        }
+        changedValues.push(rowChangedValues);
+      }
+      (this.table as ListTableAPI).changeCellValues(range.start.col, range.start.row, changedValues);
+    }
     this.editingEditor.exit && console.warn('VTable Warn: `exit` is deprecated, please use `onEnd` instead.');
     this.editingEditor.exit?.();
     this.editingEditor.onEnd?.();
@@ -326,6 +342,9 @@ export class EditManager {
       this.editingEditor.onEnd?.();
       this.editingEditor = null;
     }
+    // 清理缓存的编辑器实例，避免在后续 getEditor 调用中对已结束或未启动的编辑器重复调用 onEnd
+    Object.values(this.cacheLastSelectedCellEditor).forEach((editor: IEditor) => editor?.onEnd?.());
+    this.cacheLastSelectedCellEditor = {};
   }
 
   release() {

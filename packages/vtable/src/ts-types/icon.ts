@@ -1,6 +1,6 @@
 // ****** Icon配置信息，header ，以及列Icon *******9
 
-import type { ITextAttribute } from '@src/vrender';
+import type { ITextAttribute, ITextGraphicAttribute } from '@src/vrender';
 import type { Placement } from './table-engine';
 
 export interface IIconBase {
@@ -67,6 +67,9 @@ export interface IIconBase {
       maxWidth?: number;
       maxHeight?: number;
     };
+    /** tooltip 延迟多久显示 */
+    appearDelay?: number;
+    /** tooltip 延迟多久消失 */
     disappearDelay?: number;
   };
   /**
@@ -79,7 +82,11 @@ export interface IIconBase {
 export interface TextIcon extends IIconBase {
   type: 'text';
   content: string;
-  style?: ITextAttribute;
+  /**
+   * 文字图标的样式，支持 fill、fontSize、underline 等文字及图形属性
+   * 使用 Partial 以允许只配置需要的属性
+   */
+  style?: Partial<ITextGraphicAttribute>;
 }
 export interface ImageIcon extends IIconBase {
   type: 'image';
@@ -149,6 +156,8 @@ export enum IconFuncTypeEnum {
   dropDownState = 'dropDownState',
   play = 'play',
   damagePic = 'damagePic',
+  imageDamagePic = 'imageDamagePic',
+  videoDamagePic = 'videoDamagePic',
   expand = 'expand',
   collapse = 'collapse',
   drillDown = 'drillDown',

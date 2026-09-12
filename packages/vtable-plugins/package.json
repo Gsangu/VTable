@@ -1,6 +1,6 @@
 {
   "name": "@visactor/vtable-plugins",
-  "version": "1.22.8",
+  "version": "1.26.8",
   "description": "The search util of VTable",
   "author": {
     "name": "VisActor",
@@ -29,12 +29,14 @@
   "scripts": {
     "demo": "vite ./demo",
     "compile": "tsc --noEmit",
+    "test": "jest --silent",
     "build": "npm run fix-memory-limit && bundle --clean",
     "fix-memory-limit": "cross-env LIMIT=10240 increase-memory-limit"
   },
   "unpkg": "latest",
   "unpkgFiles": [
-    "dist/vtable-plugins.js"
+    "dist/vtable-plugins.js",
+    "dist/vtable-plugins.min.js"
   ],
   "publishConfig": {
     "access": "public"
@@ -59,18 +61,18 @@
   "devDependencies": {
     "cross-env": "^7.0.3",
     "increase-memory-limit": "^1.0.7",
-    "@visactor/vtable": "workspace:*",
-    "@visactor/vtable-editors": "workspace:*",
-    "@visactor/vtable-gantt": "workspace:*",
-    "@visactor/vchart": "2.0.11-alpha.3",
+    "@visactor/vtable": "workspace:1.26.8",
+    "@visactor/vtable-editors": "workspace:1.26.8",
+    "@visactor/vtable-gantt": "workspace:1.26.8",
+    "@visactor/vchart": "2.1.3",
     "@internal/bundler": "workspace:*",
     "@internal/eslint-config": "workspace:*",
     "@internal/ts-config": "workspace:*",
     "@rushstack/eslint-patch": "~1.1.4",
-    "react": "^18.0.0",
-    "react-dom": "^18.0.0",
-    "@types/react": "^18.0.0",
-    "@types/react-dom": "^18.0.0",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "@types/react": "18.2.79",
+    "@types/react-dom": "18.2.25",
     "@vitejs/plugin-react": "3.1.0",
     "eslint": "~8.18.0",
     "vite": "3.2.6",
@@ -107,5 +109,11 @@
     "@types/react-is": "^17.0.3",
     "rollup-plugin-node-resolve": "5.2.0",
     "@types/lodash": "4.14.182"
+  },
+  "packageManager": "pnpm@10.7.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/VisActor/VTable.git",
+    "directory": "packages/vtable-plugins"
   }
 }

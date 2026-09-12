@@ -1,13 +1,24 @@
 import type VTableSheet from '../components/vtable-sheet';
+import type { IVTableSheetOptions } from '../ts-types';
 import type { MainMenuItem } from '../ts-types/base';
 import { MainMenuItemKey } from '../ts-types/base';
 
 export class MenuManager {
   private sheet: VTableSheet;
   private menuContainer: HTMLElement;
+  private undoButton: HTMLButtonElement | null = null;
+  private redoButton: HTMLButtonElement | null = null;
+  private clickOutsideHandler: (e: MouseEvent) => void;
+  private historyUnsubscribe: (() => void) | null = null;
   constructor(sheet: VTableSheet) {
     this.sheet = sheet;
-    this.createMainMenu();
+  }
+
+  createUndoRedoOnly(): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.className = 'vtable-sheet-undo-redo';
+    this.mountUndoRedoActions(wrap);
+    return wrap;
   }
 
   createMainMenu(): HTMLElement {
@@ -22,6 +33,8 @@ export class MenuManager {
     menuButton.className = 'vtable-sheet-main-menu-button';
     menuButton.innerHTML = menuIcon;
     menu.appendChild(menuButton);
+
+    this.mountUndoRedoActions(menu);
 
     // 菜单项容器（直接作为 menu 的子元素）
     const menuContainer = document.createElement('div');
@@ -71,13 +84,70 @@ export class MenuManager {
     });
 
     // 点击外部关闭菜单
-    document.addEventListener('click', e => {
+    this.clickOutsideHandler = (e: MouseEvent) => {
       if (!menu.contains(e.target as Node)) {
         menuContainer.classList.remove('active');
       }
-    });
+    };
+    document.addEventListener('click', this.clickOutsideHandler);
     this.menuContainer = menuContainer;
     return menu;
+  }
+
+  private mountUndoRedoActions(container: HTMLElement): void {
+    const showUndoRedo = this.sheet.getOptions().undoRedo?.show ?? true;
+    if (!showUndoRedo) {
+      this.undoButton = null;
+      this.redoButton = null;
+      this.historyUnsubscribe?.();
+      this.historyUnsubscribe = null;
+      return;
+    }
+
+    const undoIcon = `<svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" data-icon="UndoOutlined"><path d="M8.707 2.293a1 1 0 0 1 0 1.414L5.414 7H14.5a7.5 7.5 0 0 1 0 15H11a1 1 0 1 1 0-2h3.5a5.5 5.5 0 1 0 0-11H5.414l3.293 3.293a1 1 0 1 1-1.414 1.414l-5-5a1 1 0 0 1 0-1.414l5-5a1 1 0 0 1 1.414 0Z" fill="currentColor"></path></svg>`;
+    const redoIcon = `<svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" data-icon="RedoOutlined"><path d="M15.293 2.293a1 1 0 0 0 0 1.414L18.586 7H9.5a7.5 7.5 0 0 0 0 15H13a1 1 0 1 0 0-2H9.5a5.5 5.5 0 1 1 0-11h9.086l-3.293 3.293a1 1 0 0 0 1.414 1.414l5-5a1 1 0 0 0 0-1.414l-5-5a1 1 0 0 0-1.414 0Z" fill="currentColor"></path></svg>`;
+
+    const actions = document.createElement('div');
+    actions.className = 'vtable-sheet-main-menu-actions';
+    container.appendChild(actions);
+
+    this.undoButton = document.createElement('button');
+    this.undoButton.className = 'vtable-sheet-main-menu-action';
+    this.undoButton.type = 'button';
+    this.undoButton.title = '撤销';
+    this.undoButton.innerHTML = undoIcon;
+    this.undoButton.addEventListener('click', e => {
+      e.stopPropagation();
+      this.sheet.undo();
+    });
+    actions.appendChild(this.undoButton);
+
+    this.redoButton = document.createElement('button');
+    this.redoButton.className = 'vtable-sheet-main-menu-action';
+    this.redoButton.type = 'button';
+    this.redoButton.title = '重做';
+    this.redoButton.innerHTML = redoIcon;
+    this.redoButton.addEventListener('click', e => {
+      e.stopPropagation();
+      this.sheet.redo();
+    });
+    actions.appendChild(this.redoButton);
+
+    this.historyUnsubscribe?.();
+    this.historyUnsubscribe = this.sheet.getWorkbookHistoryManager().onChange(() => {
+      this.updateUndoRedoState();
+    });
+    this.updateUndoRedoState();
+  }
+
+  private updateUndoRedoState(): void {
+    const history = this.sheet.getWorkbookHistoryManager();
+    if (this.undoButton) {
+      this.undoButton.disabled = !history.canUndo();
+    }
+    if (this.redoButton) {
+      this.redoButton.disabled = !history.canRedo();
+    }
   }
   //TODO 需要重新逻辑，需要支持多级菜单
   private createSubMenu(items: MainMenuItem[]): HTMLElement {
@@ -156,6 +226,7 @@ export class MenuManager {
   }
   handleMenuClick(menuKey: MainMenuItemKey) {
     const tableInstance = this.sheet.getActiveSheet().tableInstance;
+    const eventManager = this.sheet.getSpreadSheetEventManager();
 
     switch (menuKey) {
       case MainMenuItemKey.IMPORT:
@@ -165,25 +236,91 @@ export class MenuManager {
         break;
 
       case MainMenuItemKey.EXPORT_CURRENT_SHEET_CSV:
-        if ((tableInstance as any)?.exportToCsv) {
-          (tableInstance as any).exportToCsv();
-        } else {
-          console.warn('Please configure TableExportPlugin in VTablePluginModules');
+        try {
+          // 触发导出开始事件
+          eventManager.emitExportStart('csv', false);
+
+          if ((tableInstance as any)?.exportToCsv) {
+            (tableInstance as any).exportToCsv();
+            // 触发导出完成事件
+            eventManager.emitExportCompleted('csv', false, 1);
+          } else {
+            console.warn('Please configure TableExportPlugin in VTablePluginModules');
+            // 触发导出失败事件
+            eventManager.emitExportError('csv', false, 'TableExportPlugin not configured');
+          }
+        } catch (error) {
+          // 触发导出失败事件
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          eventManager.emitExportError('csv', false, errorMessage);
+          console.warn('Export to CSV failed:', errorMessage);
         }
         break;
+
       case MainMenuItemKey.EXPORT_CURRENT_SHEET_XLSX:
-        if ((tableInstance as any)?.exportToExcel) {
-          (tableInstance as any).exportToExcel();
-        } else {
-          console.warn('Please configure TableExportPlugin in VTablePluginModules');
+        try {
+          // 触发导出开始事件
+          eventManager.emitExportStart('xlsx', false);
+
+          if ((tableInstance as any)?.exportToExcel) {
+            (tableInstance as any).exportToExcel();
+            // 触发导出完成事件
+            eventManager.emitExportCompleted('xlsx', false, 1);
+          } else {
+            console.warn('Please configure TableExportPlugin in VTablePluginModules');
+            // 触发导出失败事件
+            eventManager.emitExportError('xlsx', false, 'TableExportPlugin not configured');
+          }
+        } catch (error) {
+          // 触发导出失败事件
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          eventManager.emitExportError('xlsx', false, errorMessage);
+          console.warn('Export to Excel failed:', errorMessage);
         }
         break;
+
       case MainMenuItemKey.EXPORT_ALL_SHEETS_XLSX:
-        // 多 sheet 导出走 vtable-plugins 的导出工具，不依赖向 tableInstance 注入 exportToExcel
-        this.sheet.exportAllSheetsToExcel?.();
+        try {
+          // 触发导出开始事件
+          eventManager.emitExportStart('xlsx', true);
+
+          // 多 sheet 导出走 vtable-plugins 的导出工具，不依赖向 tableInstance 注入 exportToExcel
+          if (this.sheet.exportAllSheetsToExcel) {
+            this.sheet.exportAllSheetsToExcel();
+            // 触发导出完成事件
+            const sheetCount = this.sheet.getSheetCount();
+            eventManager.emitExportCompleted('xlsx', true, sheetCount);
+          } else {
+            console.warn('Export all sheets method not available');
+            // 触发导出失败事件
+            eventManager.emitExportError('xlsx', true, 'Export all sheets method not available');
+          }
+        } catch (error) {
+          // 触发导出失败事件
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          eventManager.emitExportError('xlsx', true, errorMessage);
+          console.warn('Export all sheets failed:', errorMessage);
+        }
         break;
+
       default:
         break;
     }
+  }
+
+  /**
+   * 清理菜单管理器，移除全局事件监听器
+   */
+  release(): void {
+    if (this.clickOutsideHandler) {
+      document.removeEventListener('click', this.clickOutsideHandler);
+      this.clickOutsideHandler = null;
+    }
+    this.historyUnsubscribe?.();
+    this.historyUnsubscribe = null;
+  }
+  updateMainMenu(mainMenu: IVTableSheetOptions['mainMenu']): HTMLElement {
+    this.release();
+    return this.createMainMenu();
   }
 }

@@ -82,20 +82,25 @@ dataConfig: {
           showGrandTotals: true,
           showSubTotals: true,
           subTotalsDimensions: ['province'],
+          grandTotalDimensions: ['province'], // Group the grand total by province and append an overall subtotal
           grandTotalLabel: 'row total',
           subTotalLabel: 'Subtotal',
-          showGrandTotalsOnTop: true //totals show on top
+          showGrandTotalsOnTop: true, //totals show on top
+          showSubTotalsOnTreeNode: false // When subtotals are disabled in pivot tables, this option allows aggregated values to be displayed on collapsed tree nodes. Default value is false.
         },
         column: {
           showGrandTotals: true,
           showSubTotals: true,
           subTotalsDimensions: ['quarter'],
           grandTotalLabel: 'column total',
-          subTotalLabel: 'Subtotal'
+          subTotalLabel: 'Subtotal',
+          showSubTotalsOnTreeNode: false // When subtotals are disabled in pivot tables, this option allows aggregated values to be displayed on collapsed tree nodes. Default value is false.
         }
       }
     },
 ```
+
+`grandTotalDimensions` retains lower-level dimensions in the grand total area. For example, with the row dimensions `['region', 'province']` shown above, setting `grandTotalDimensions: ['province']` displays a total for each province under "row total" and appends an overall "Subtotal" row. The same option is available for column totals. Only dimensions after the first dimension on the current axis are supported. When omitted, VTable keeps the original single grand total.
 
 Online demo：https://visactor.io/vtable/demo/data-analysis/pivot-analysis-total
 
@@ -250,9 +255,10 @@ dataConfig:{
   }]
 }
 ```
-  In this data record, the sales indicator is a non-numeric value. If the product requirement is to directly display `"NULL"` in the table cell, then the aggregation rule can be set to `VTable.TYPES.AggregationType.NONE`, so that VTable's internal will not perform aggregation calculations, but directly take the `sales` field value as the display value of the cell.
 
-  2. AggregationType.RECORD usage scenario is mainly used to match all data based on the user's input data record and use it as the display data of the cell. Usage scenarios include: needing to collect data sets for mini-chart displays, specific demo see: https://visactor.io/vtable/demo/cell-type/pivot-sparkline
+In this data record, the sales indicator is a non-numeric value. If the product requirement is to directly display `"NULL"` in the table cell, then the aggregation rule can be set to `VTable.TYPES.AggregationType.NONE`, so that VTable's internal will not perform aggregation calculations, but directly take the `sales` field value as the display value of the cell.
+
+2. AggregationType.RECORD usage scenario is mainly used to match all data based on the user's input data record and use it as the display data of the cell. Usage scenarios include: needing to collect data sets for mini-chart displays, specific demo see: https://visactor.io/vtable/demo/cell-type/pivot-sparkline
 
 #### Custom Aggregation Type Introduction
 
@@ -313,7 +319,7 @@ const option={
         {
           indicatorKey: 'Average Product Price (Registered Aggregation Class)', //Indicator name
           field: 'sales', //Indicator based field
-          aggregationType: 'avgPrice', //Registered aggregation type 
+          aggregationType: 'avgPrice', //Registered aggregation type
         }
       ]
   }
@@ -323,6 +329,7 @@ const option={
 VTable's internal aggregation rules code address: https://github.com/VisActor/VTable/blob/develop/packages/vtable/src/ts-types/dataset/aggregation.ts, can be referred to!
 
 The methods that need to be implemented for the aggregation type are:
+
 - constructor: The constructor function, used to initialize the aggregator.
 - push: Add data records to the aggregator, used to calculate the aggregated value.
 - deleteRecord: Delete records from the aggregator and update the aggregated value, called by VTable's delete interface deleteRecords.

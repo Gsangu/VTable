@@ -7,12 +7,31 @@ import { calcKeepAspectRatioSize } from '../../utils/keep-aspect-ratio';
 import { calcStartPosition } from '../../utils/cell-pos';
 import type { Scenegraph } from '../../scenegraph';
 import { getProp, getFunctionalProp } from '../../utils/get-prop';
-import { isValid } from '@visactor/vutils';
+import { isBase64, isValid, isValidUrl } from '@visactor/vutils';
 import { getQuadProps } from '../../utils/padding';
 import { getCellBorderStrokeWidth } from '../../utils/cell-border-stroke-width';
 import type { BaseTableAPI } from '../../../ts-types/base-table';
 import type { CellRange } from '../../../ts-types';
 import { dealWithIconLayout } from '../../utils/text-icon-layout';
+import {
+  getCellMediaChildren,
+  getCellMediaImage,
+  getCellMediaPlayIcon,
+  markCellMedia,
+  removeCellMediaChildren
+} from './media-cell-helper';
+
+function hasCellMedia(cellGroup: Group): boolean {
+  return getCellMediaChildren(cellGroup).length > 0;
+}
+
+function getResizeImage(cellGroup: Group): Image | undefined {
+  return hasCellMedia(cellGroup) ? (getCellMediaImage(cellGroup) as Image) : undefined;
+}
+
+function getResizePlayIcon(cellGroup: Group): Image | undefined {
+  return hasCellMedia(cellGroup) ? (getCellMediaPlayIcon(cellGroup) as Image) : undefined;
+}
 
 export function createImageCellGroup(
   columnGroup: Group,
@@ -31,7 +50,8 @@ export function createImageCellGroup(
   table: BaseTableAPI,
   cellTheme: IThemeSpec,
   range: CellRange | undefined,
-  isAsync: boolean
+  isAsync: boolean,
+  cellValue?: any
 ) {
   const headerStyle = table._getCellStyle(col, row); // to be fixed
   const functionalPadding = getFunctionalProp('padding', headerStyle, col, row, table);
@@ -95,7 +115,7 @@ export function createImageCellGroup(
     cellGroup.role = 'cell';
     cellGroup.col = col;
     cellGroup.row = row;
-    columnGroup?.addCellGroup(cellGroup);
+    cellGroup = columnGroup?.addCellGroup(cellGroup) ?? cellGroup;
   }
 
   let cellIcons;
@@ -145,21 +165,24 @@ export function createImageCellGroup(
         child.setAttribute('y', padding[0]);
       }
     });
-
-    (cellGroup as any)._cellLeftIconWidth = cellLeftIconWidth;
-    (cellGroup as any)._cellRightIconWidth = cellRightIconWidth;
   }
+  (cellGroup as any)._cellLeftIconWidth = cellLeftIconWidth;
+  (cellGroup as any)._cellRightIconWidth = cellRightIconWidth;
 
   // image
-  const value = table.getCellValue(col, row);
-  const image: IImage = createImage({
-    x: padding[3],
-    y: padding[0],
-    width: width - padding[1] - padding[3] - iconWidth,
-    height: height - padding[0] - padding[2],
-    image: value, //?? (regedIcons.damage_pic as any).svg,
-    cursor: 'pointer' as Cursor
-  });
+  const value = arguments.length >= 18 ? cellValue : table.getCellValue(col, row);
+  removeCellMediaChildren(cellGroup);
+  const image: IImage = markCellMedia(
+    createImage({
+      x: padding[3],
+      y: padding[0],
+      width: width - padding[1] - padding[3] - iconWidth,
+      height: height - padding[0] - padding[2],
+      image: value,
+      cursor: 'pointer' as Cursor
+    }),
+    'image'
+  );
   image.name = 'image';
   image.keepAspectRatio = keepAspectRatio;
   image.textAlign = textAlign;
@@ -213,11 +236,24 @@ export function createImageCellGroup(
       };
     }
   }
+
   (image as any).failCallback = () => {
     const regedIcons = icons.get();
-    // image.setAttribute('image', (regedIcons.damage_pic as any).svg);
-    (image as any).image = (regedIcons.damage_pic as any).svg;
+    (image as any).image = regedIcons.image_damage_pic
+      ? (regedIcons.image_damage_pic as any).svg
+      : (regedIcons.damage_pic as any).svg;
   };
+
+  if (typeof value === 'string') {
+    if (!(value.startsWith('<svg') || isValidUrl(value) || value.includes('/') || isBase64(value))) {
+      //vrender-core 中的graphic.ts文件中有这个判断 导致无法进入failCallback，所以这里暂时这样处理了
+      //按fail情况处理
+      const regedIcons = icons.get();
+      (image as any).image = regedIcons.image_damage_pic
+        ? (regedIcons.image_damage_pic as any).svg
+        : (regedIcons.damage_pic as any).svg;
+    }
+  }
   cellGroup.appendChild(image);
 
   return cellGroup;
@@ -300,7 +336,7 @@ export function updateImageCellContentWhileResize(
   deltaY: number,
   table: BaseTableAPI
 ) {
-  const image = cellGroup.getChildByName('image') as Image;
+  const image = getResizeImage(cellGroup);
   if (!image) {
     return;
   }
@@ -308,7 +344,7 @@ export function updateImageCellContentWhileResize(
     (typeof image.attribute.image !== 'string' && image.attribute.image) ||
     image.resources?.get(image.attribute.image as string).data;
 
-  if (!originImage) {
+  if (!originImage && !(image as any).isAudioIcon) {
     return;
   }
 
@@ -326,12 +362,40 @@ export function updateImageCellContentWhileResize(
   const colStart = cellGroup.mergeStartCol ?? cellGroup.col;
   const rowStart = cellGroup.mergeStartRow ?? cellGroup.row;
   const colEnd = cellGroup.mergeEndCol ?? cellGroup.col;
-  const rowEnd = cellGroup.mergeEndCol ?? cellGroup.row;
+  const rowEnd = cellGroup.mergeEndRow ?? cellGroup.row;
 
   const leftIconWidth = (cellGroup as any)._cellLeftIconWidth ?? 0;
   const rightIconWidth = (cellGroup as any)._cellRightIconWidth ?? 0;
 
-  if ((image as any).keepAspectRatio) {
+  if ((image as any).isAudioIcon) {
+    const availableWidth = Math.max(1, cellWidth - padding[1] - padding[3] - leftIconWidth - rightIconWidth);
+    const availableHeight = Math.max(1, cellHeight - padding[0] - padding[2]);
+    const iconSize = Math.max(1, Math.min(availableWidth, availableHeight, 32));
+    const pos = calcStartPosition(
+      leftIconWidth,
+      0,
+      cellWidth - leftIconWidth - rightIconWidth,
+      cellHeight,
+      iconSize,
+      iconSize,
+      textAlign,
+      textBaseline,
+      padding
+    );
+
+    for (let col = colStart; col <= colEnd; col++) {
+      for (let row = rowStart; row <= rowEnd; row++) {
+        const cellGroup = table.scenegraph.getCell(col, row);
+        const image = getResizeImage(cellGroup);
+        image?.setAttributes({
+          x: pos.x,
+          y: pos.y,
+          width: iconSize,
+          height: iconSize
+        });
+      }
+    }
+  } else if ((image as any).keepAspectRatio || isDamagePic(image)) {
     const { width: imageWidth, height: imageHeight } = calcKeepAspectRatioSize(
       originImage.width || (originImage as any).videoWidth,
       originImage.height || (originImage as any).videoHeight,
@@ -358,7 +422,7 @@ export function updateImageCellContentWhileResize(
     for (let col = colStart; col <= colEnd; col++) {
       for (let row = rowStart; row <= rowEnd; row++) {
         const cellGroup = table.scenegraph.getCell(col, row);
-        const image = cellGroup.getChildByName('image') as Image;
+        const image = getResizeImage(cellGroup);
         image?.setAttributes({
           x: pos.x,
           y: pos.y,
@@ -371,7 +435,7 @@ export function updateImageCellContentWhileResize(
     for (let col = colStart; col <= colEnd; col++) {
       for (let row = rowStart; row <= rowEnd; row++) {
         const cellGroup = table.scenegraph.getCell(col, row);
-        const image = cellGroup.getChildByName('image') as Image;
+        const image = getResizeImage(cellGroup);
         image?.setAttributes({
           x: leftIconWidth + padding[3],
           y: padding[0],
@@ -385,7 +449,7 @@ export function updateImageCellContentWhileResize(
   }
 
   // update video play icon
-  const playIcon = cellGroup.getChildByName('play-icon');
+  const playIcon = getResizePlayIcon(cellGroup);
   if (playIcon) {
     const left = 0;
     const top = 0;
@@ -401,8 +465,8 @@ export function updateImageCellContentWhileResize(
     for (let col = colStart; col <= colEnd; col++) {
       for (let row = rowStart; row <= rowEnd; row++) {
         const cellGroup = table.scenegraph.getCell(col, row);
-        const playIcon = cellGroup.getChildByName('play-icon') as Image;
-        playIcon.setAttributes({
+        const playIcon = getResizePlayIcon(cellGroup);
+        playIcon?.setAttributes({
           x: anchorX - iconSize / 2,
           y: anchorY - iconSize / 2,
           width: iconSize,
@@ -479,14 +543,14 @@ export function updateImageDxDy(
     for (let row = startRow; row <= endRow; row++) {
       const cellGroup = table.scenegraph.getCell(col, row);
       if (cellGroup) {
-        const image = cellGroup.getChildByName('image');
+        const image = getResizeImage(cellGroup);
         if (image) {
           image.setAttributes({
             dx: -table.getColsWidth(cellGroup.mergeStartCol, col - 1),
             dy: -table.getRowsHeight(cellGroup.mergeStartRow, row - 1)
           });
         }
-        const playIcon = cellGroup.getChildByName('play-icon');
+        const playIcon = getResizePlayIcon(cellGroup);
         if (playIcon) {
           playIcon.setAttributes({
             dx: -table.getColsWidth(cellGroup.mergeStartCol, col - 1),
@@ -498,7 +562,7 @@ export function updateImageDxDy(
   }
 }
 
-function updateAutoSizingAndKeepAspectRatio(
+export function updateAutoSizingAndKeepAspectRatio(
   imageAutoSizing: boolean,
   keepAspectRatio: boolean,
   padding: [number, number, number, number],
@@ -571,7 +635,11 @@ function updateAutoSizingAndKeepAspectRatio(
   }
 }
 
-function isDamagePic(image: IImage) {
+export function isDamagePic(image: IImage) {
   const regedIcons = icons.get();
-  return image.attribute.image === (regedIcons.damage_pic as any).svg;
+  return (
+    image.attribute.image === (regedIcons.damage_pic as any).svg ||
+    (regedIcons.image_damage_pic && image.attribute.image === (regedIcons.image_damage_pic as any).svg) ||
+    (regedIcons.video_damage_pic && image.attribute.image === (regedIcons.video_damage_pic as any).svg)
+  );
 }

@@ -1,5 +1,6 @@
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const path = require('path');
+const { createVRenderModuleNameMapper } = require('../../common/config/jest/vrender-module-name-mapper');
 
 module.exports = {
   preset: 'ts-jest',
@@ -15,7 +16,13 @@ module.exports = {
       },
       tsconfig: {
         resolveJsonModule: true,
-        esModuleInterop: true
+        esModuleInterop: true,
+        paths: {
+          '@visactor/vtable/es/vrender-app': ['../vtable/src/vrender-app.ts'],
+          '@visactor/vtable/es/vrender': ['../vtable/src/vrender.ts'],
+          '@src/vrender': ['../vtable/src/vrender.ts'],
+          '@src/*': ['../vtable/src/*']
+        }
       }
     },
     __DEV__: true
@@ -40,6 +47,7 @@ module.exports = {
       statements: 60
     }
   },
+  cacheDirectory: '<rootDir>/.jest-cache',
   moduleNameMapper: {
     'd3-color': path.resolve(__dirname, './node_modules/d3-color/dist/d3-color.min.js'),
     'd3-array': path.resolve(process.cwd(), './node_modules/d3-array/dist/d3-array.min.js'),
@@ -47,10 +55,14 @@ module.exports = {
     'd3-dsv': path.resolve(__dirname, './node_modules/d3-dsv/dist/d3-dsv.min.js'),
     'd3-hexbin': path.resolve(__dirname, './node_modules/d3-hexbin/build/d3-hexbin.min.js'),
     'd3-hierarchy': path.resolve(__dirname, './node_modules/d3-hierarchy/dist/d3-hierarchy.min.js'),
-    '@visactor/vtable-editors': path.resolve(__dirname, '../vtable-editors/src/index.ts'),
-    '@visactor/vtable': path.resolve(__dirname, '../vtable/src/index.ts'),
-    '@visactor/vtable/es/vrender': path.resolve(__dirname, '../vtable/src/vrender.ts'),
-    '@vutils-extension': path.resolve(__dirname, './src/vutil-extension-temp/index.ts')
+    ...createVRenderModuleNameMapper('<rootDir>/../vtable/node_modules'),
+    '^@visactor/vtable-editors$': path.resolve(__dirname, '../vtable-editors/src/index.ts'),
+    '^@visactor/vtable/es/themes$': path.resolve(__dirname, '../vtable/src/themes.ts'),
+    '^@visactor/vtable/es/vrender-app$': path.resolve(__dirname, '../vtable/src/vrender-app.ts'),
+    '^@visactor/vtable/es/vrender$': path.resolve(__dirname, '../vtable/src/vrender.ts'),
+    '^@visactor/vtable$': path.resolve(__dirname, '../vtable/src/index.ts'),
+    '^@src/vrender$': path.resolve(__dirname, '../vtable/src/vrender.ts'),
+    '^@vutils-extension$': path.resolve(__dirname, './src/vutil-extension-temp/index.ts')
   },
   setupFiles: ['./setup-mock.js']
 };

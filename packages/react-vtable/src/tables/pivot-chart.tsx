@@ -1,15 +1,14 @@
 import type React from 'react';
-import { register } from '@visactor/vtable';
-import type { PivotChartConstructorOptions } from '@visactor/vtable';
-import { PivotChart as PivotChartConstrouctor } from '@visactor/vtable';
+import { register, PivotChart as PivotChartConstrouctor, type PivotChartConstructorOptions } from '@visactor/vtable';
 import type { BaseTableProps } from './base-table';
 import { createTable } from './base-table';
 
 interface AnyRecords {
   records: Record<string, unknown>[];
 }
+
 export interface PivotChartProps
-  extends Omit<BaseTableProps, 'records'>,
+  extends Omit<BaseTableProps, 'records' | 'columnWidthConfig' | 'columns' | 'dragOrder' | 'resize'>,
     Omit<PivotChartConstructorOptions, 'container' | 'records'>,
     AnyRecords {}
 

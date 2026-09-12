@@ -254,12 +254,15 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
           this.internalProps.emptyTip?.resetVisible();
         }
       }
+      // 首次布局同样通过 BaseTable.resize() 完成，遵循 componentLayoutOrder 中的 title/legend 优先级
+      this.resize();
       //为了确保用户监听得到这个事件 这里做了异步 确保vtable实例已经初始化完成
       setTimeout(() => {
         if (this.isReleased) {
           return;
         }
-        this.resize();
+        // // 首次布局同样通过 BaseTable.resize() 完成，遵循 componentLayoutOrder 中的 title/legend 优先级
+        // this.resize(); 注释掉这里为解决有组件的情况下 异步导致的布局抖动问题,所以把resize提到了setTimeout之前。但是原先在setTimeout中可能是为了scrollBar布局，但提到前面测试了下好像没有什么问题！后续看观察scrollBar
         this.fireListeners(TABLE_EVENT_TYPE.INITIALIZED, null);
       }, 0);
     }
@@ -500,7 +503,7 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
     if (options.title) {
       const Title = Factory.getComponent('title') as ITitleComponent;
       this.internalProps.title = new Title(options.title, this);
-      this.scenegraph.resize();
+      // this.scenegraph.resize();//下面有个resize了 所以这个可以去掉
     }
     if (this.options.emptyTip) {
       if (this.internalProps.emptyTip) {
@@ -511,7 +514,11 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
         this.internalProps.emptyTip?.resetVisible();
       }
     }
+    // 首次布局同样通过 BaseTable.resize() 完成，遵循 componentLayoutOrder 中的 title/legend 优先级
+    this.resize();
     setTimeout(() => {
+      // // 首次布局同样通过 BaseTable.resize() 完成，遵循 componentLayoutOrder 中的 title/legend 优先级
+      // this.resize();
       this.fireListeners(TABLE_EVENT_TYPE.UPDATED, null);
     }, 0);
     // this.render();
@@ -680,7 +687,7 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
                 index
               };
             }
-            return colPath.indicatorKey ?? colPath.value;
+            return colPath.indicatorKey ?? colPath.dataValue ?? colPath.value;
           });
         const rowKeys = cellDimensionPath.rowHeaderPaths
           ?.filter((path: any) => {
@@ -693,7 +700,7 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
                 index
               };
             }
-            return rowPath.indicatorKey ?? rowPath.value;
+            return rowPath.indicatorKey ?? rowPath.dataValue ?? rowPath.value;
           });
         const aggregator = this.dataset.getAggregator(
           // !this.internalProps.layoutMap.indicatorsAsCol ? rowKeys.slice(0, -1) : rowKeys,
@@ -713,10 +720,10 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
       //数据为行列树结构 根据row col获取对应的维度名称 查找到对应值
       const cellDimensionPath = this.internalProps.layoutMap.getCellHeaderPaths(col, row);
       const colKeys = cellDimensionPath.colHeaderPaths.map((colPath: any) => {
-        return colPath.indicatorKey ?? colPath.value;
+        return colPath.indicatorKey ?? colPath.dataValue ?? colPath.value;
       });
       const rowKeys = cellDimensionPath.rowHeaderPaths.map((rowPath: any) => {
-        return rowPath.indicatorKey ?? rowPath.value;
+        return rowPath.indicatorKey ?? rowPath.dataValue ?? rowPath.value;
       });
       const treeNode = this.flatDataToObjects.getTreeNode(
         rowKeys,
@@ -772,7 +779,7 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
               index
             };
           }
-          return colPath.indicatorKey ?? colPath.value;
+          return colPath.indicatorKey ?? colPath.dataValue ?? colPath.value;
         });
       const rowKeys = cellDimensionPath.rowHeaderPaths
         ?.filter((path: any) => {
@@ -785,7 +792,7 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
               index
             };
           }
-          return rowPath.indicatorKey ?? rowPath.value;
+          return rowPath.indicatorKey ?? rowPath.dataValue ?? rowPath.value;
         });
       const aggregator = this.dataset.getAggregator(
         // !this.internalProps.layoutMap.indicatorsAsCol ? rowKeys.slice(0, -1) : rowKeys,
@@ -809,10 +816,10 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
       //数据为行列树结构 根据row col获取对应的维度名称 查找到对应值
       const cellDimensionPath = this.internalProps.layoutMap.getCellHeaderPaths(col, row);
       const colKeys = cellDimensionPath.colHeaderPaths.map((colPath: any) => {
-        return colPath.indicatorKey ?? colPath.value;
+        return colPath.indicatorKey ?? colPath.dataValue ?? colPath.value;
       });
       const rowKeys = cellDimensionPath.rowHeaderPaths.map((rowPath: any) => {
-        return rowPath.indicatorKey ?? rowPath.value;
+        return rowPath.indicatorKey ?? rowPath.dataValue ?? rowPath.value;
       });
       const valueNode = this.flatDataToObjects.getTreeNode(
         rowKeys,
@@ -852,7 +859,7 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
               index
             };
           }
-          return colPath.indicatorKey ?? colPath.value;
+          return colPath.indicatorKey ?? colPath.dataValue ?? colPath.value;
         });
       const rowKeys = cellDimensionPath.rowHeaderPaths
         ?.filter((path: any) => {
@@ -865,7 +872,7 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
               index
             };
           }
-          return rowPath.indicatorKey ?? rowPath.value;
+          return rowPath.indicatorKey ?? rowPath.dataValue ?? rowPath.value;
         });
       const aggregator = this.dataset.getAggregator(
         // !this.internalProps.layoutMap.indicatorsAsCol ? rowKeys.slice(0, -1) : rowKeys,
@@ -882,10 +889,10 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
       //数据为行列树结构 根据row col获取对应的维度名称 查找到对应值
       const cellDimensionPath = this.internalProps.layoutMap.getCellHeaderPaths(col, row);
       const colKeys = cellDimensionPath.colHeaderPaths.map((colPath: any) => {
-        return colPath.indicatorKey ?? colPath.value;
+        return colPath.indicatorKey ?? colPath.dataValue ?? colPath.value;
       });
       const rowKeys = cellDimensionPath.rowHeaderPaths.map((rowPath: any) => {
-        return rowPath.indicatorKey ?? rowPath.value;
+        return rowPath.indicatorKey ?? rowPath.dataValue ?? rowPath.value;
       });
       const treeNode = this.flatDataToObjects.getTreeNode(
         rowKeys,
@@ -925,7 +932,7 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
               index
             };
           }
-          return colPath.indicatorKey ?? colPath.value;
+          return colPath.indicatorKey ?? colPath.dataValue ?? colPath.value;
         });
       const rowKeys = cellDimensionPath.rowHeaderPaths
         ?.filter((path: any) => {
@@ -938,7 +945,7 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
               index
             };
           }
-          return rowPath.indicatorKey ?? rowPath.value;
+          return rowPath.indicatorKey ?? rowPath.dataValue ?? rowPath.value;
         });
       const aggregator = this.dataset.getAggregator(
         // !this.internalProps.layoutMap.indicatorsAsCol ? rowKeys.slice(0, -1) : rowKeys,
@@ -954,10 +961,10 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
       //数据为行列树结构 根据row col获取对应的维度名称 查找到对应值
       const cellDimensionPath = this.internalProps.layoutMap.getCellHeaderPaths(col, row);
       const colKeys = cellDimensionPath.colHeaderPaths.map((colPath: any) => {
-        return colPath.indicatorKey ?? colPath.value;
+        return colPath.indicatorKey ?? colPath.dataValue ?? colPath.value;
       });
       const rowKeys = cellDimensionPath.rowHeaderPaths.map((rowPath: any) => {
-        return rowPath.indicatorKey ?? rowPath.value;
+        return rowPath.indicatorKey ?? rowPath.dataValue ?? rowPath.value;
       });
       const treeNode = this.flatDataToObjects.getTreeNode(
         rowKeys,
@@ -994,7 +1001,7 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
               index
             };
           }
-          return colPath.indicatorKey ?? colPath.value;
+          return colPath.indicatorKey ?? colPath.dataValue ?? colPath.value;
         });
       const rowKeys = cellDimensionPath.rowHeaderPaths
         ?.filter((path: any) => {
@@ -1007,7 +1014,7 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
               index
             };
           }
-          return rowPath.indicatorKey ?? rowPath.value;
+          return rowPath.indicatorKey ?? rowPath.dataValue ?? rowPath.value;
         });
       const aggregator = this.dataset.getAggregator(
         // !this.internalProps.layoutMap.indicatorsAsCol ? rowKeys.slice(0, -1) : rowKeys,
@@ -1024,10 +1031,10 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
       //数据为行列树结构 根据row col获取对应的维度名称 查找到对应值
       const cellDimensionPath = this.internalProps.layoutMap.getCellHeaderPaths(col, row);
       const colKeys = cellDimensionPath.colHeaderPaths.map((colPath: any) => {
-        return colPath.indicatorKey ?? colPath.value;
+        return colPath.indicatorKey ?? colPath.dataValue ?? colPath.value;
       });
       const rowKeys = cellDimensionPath.rowHeaderPaths.map((rowPath: any) => {
-        return rowPath.indicatorKey ?? rowPath.value;
+        return rowPath.indicatorKey ?? rowPath.dataValue ?? rowPath.value;
       });
       const treeNode = this.flatDataToObjects.getTreeNode(
         rowKeys,
@@ -1062,7 +1069,7 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
               index
             };
           }
-          return colPath.indicatorKey ?? colPath.value;
+          return colPath.indicatorKey ?? colPath.dataValue ?? colPath.value;
         });
       const rowKeys = cellDimensionPath.rowHeaderPaths
         ?.filter((path: any) => {
@@ -1075,7 +1082,7 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
               index
             };
           }
-          return rowPath.indicatorKey ?? rowPath.value;
+          return rowPath.indicatorKey ?? rowPath.dataValue ?? rowPath.value;
         });
       const aggregator = this.dataset.getAggregator(
         // !this.internalProps.layoutMap.indicatorsAsCol ? rowKeys.slice(0, -1) : rowKeys,
@@ -1092,10 +1099,10 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
       //数据为行列树结构 根据row col获取对应的维度名称 查找到对应值
       const cellDimensionPath = this.internalProps.layoutMap.getCellHeaderPaths(col, row);
       const colKeys = cellDimensionPath.colHeaderPaths.map((colPath: any) => {
-        return colPath.indicatorKey ?? colPath.value;
+        return colPath.indicatorKey ?? colPath.dataValue ?? colPath.value;
       });
       const rowKeys = cellDimensionPath.rowHeaderPaths.map((rowPath: any) => {
-        return rowPath.indicatorKey ?? rowPath.value;
+        return rowPath.indicatorKey ?? rowPath.dataValue ?? rowPath.value;
       });
       const treeNode = this.flatDataToObjects.getTreeNode(
         rowKeys,
@@ -1118,6 +1125,8 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
     }
     this.dataset.updateSortRules(sortRules);
     this._changePivotSortStateBySortRules();
+    // 排序后dataset重新生成了树结构，需要重新过滤hide指标节点
+    this._filterHideIndicatorNode();
     const { layoutMap } = this.internalProps;
     layoutMap.resetHeaderTree();
     // 清空单元格内容
@@ -1152,6 +1161,8 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
       const sortRule = sortRules[i];
       // if ((sortRule as SortByIndicatorRule).sortType) {
       const dimensions: IDimensionInfo[] = [];
+      const sortType = sortRule.sortType ? (sortRule.sortType.toUpperCase() as 'ASC' | 'DESC' | 'NORMAL') : 'ASC';
+
       if (
         (sortRule as SortByIndicatorRule).sortByIndicator &&
         (sortRule as SortByIndicatorRule).sortField ===
@@ -1171,19 +1182,72 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
             this.internalProps.layoutMap.getIndicatorInfo((sortRule as SortByIndicatorRule).sortByIndicator)?.title ??
             (sortRule as SortByIndicatorRule).sortByIndicator
         });
-      } else {
-        dimensions.push({
-          dimensionKey: (sortRule as SortTypeRule).sortField,
-          isPivotCorner: true,
-          value: (sortRule as SortTypeRule).sortField
+        this.pivotSortState.push({
+          dimensions,
+          order: SortType[sortType]
         });
+      } else {
+        const sortField = (sortRule as SortTypeRule).sortField;
+        const rowIndex = this.dataset.rows.indexOf(sortField);
+        const colIndex = this.dataset.columns.indexOf(sortField);
+        let pushed = false;
+
+        if (rowIndex >= 0) {
+          const rowDimensions = [];
+          for (let k = 0; k <= rowIndex; k++) {
+            rowDimensions.push({
+              dimensionKey: this.dataset.rows[k],
+              isPivotCorner: true,
+              value: this.dataset.rows[k]
+            });
+          }
+          this.pivotSortState.push({
+            dimensions: rowDimensions,
+            order: SortType[sortType]
+          });
+          pushed = true;
+        }
+
+        if (colIndex >= 0) {
+          const colDimensions = [];
+          for (let k = 0; k <= colIndex; k++) {
+            colDimensions.push({
+              dimensionKey: this.dataset.columns[k],
+              isPivotCorner: true,
+              value: this.dataset.columns[k]
+            });
+          }
+          this.pivotSortState.push({
+            dimensions: colDimensions,
+            order: SortType[sortType]
+          });
+          pushed = true;
+        }
+
+        if (!pushed) {
+          dimensions.push({
+            dimensionKey: sortField,
+            isPivotCorner: true,
+            value: sortField
+          });
+          this.pivotSortState.push({
+            dimensions,
+            order: SortType[sortType]
+          });
+        }
       }
-      const sortType = sortRule.sortType ? (sortRule.sortType.toUpperCase() as 'ASC' | 'DESC' | 'NORMAL') : 'ASC';
-      this.pivotSortState.push({
-        dimensions,
-        order: SortType[sortType]
-      });
       // }
+    }
+  }
+
+  // 重新过滤hide指标节点
+  _filterHideIndicatorNode() {
+    const options = this.options;
+    if (options.indicatorsAsCol !== false && options.indicators && this.dataset.colHeaderTree) {
+      deleteHideIndicatorNode(this.dataset.colHeaderTree, options.indicators, false, this);
+    }
+    if (options.indicatorsAsCol === false && this.dataset.rowHeaderTree && options.indicators) {
+      deleteHideIndicatorNode(this.dataset.rowHeaderTree, options.indicators, false, this);
     }
   }
 
@@ -1328,8 +1392,62 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
     for (let i = 0; i < this.pivotSortState.length; i++) {
       const pivotState = this.pivotSortState[i];
       const dimensions = pivotState.dimensions;
+
+      if (this.isCornerHeader(col, row)) {
+        const layoutMap = this.internalProps.layoutMap as PivotHeaderLayoutMap;
+        const header = layoutMap.getHeader(col, row) as HeaderData;
+        if (header && header.pivotInfo && dimensions && dimensions.length > 0) {
+          let cellPathKeys: string[] = [];
+          const leftSnCount = layoutMap.leftRowSeriesNumberColumnCount ?? 0;
+          if (layoutMap.cornerSetting.titleOnDimension === 'row') {
+            const dimIndex = col - leftSnCount;
+            cellPathKeys = layoutMap.rowDimensionKeys.slice(0, dimIndex + 1);
+          } else if (layoutMap.cornerSetting.titleOnDimension === 'column') {
+            const dimIndex = row;
+            cellPathKeys = layoutMap.colDimensionKeys.slice(0, dimIndex + 1);
+          } else if (layoutMap.cornerSetting.titleOnDimension === 'all') {
+            if (layoutMap.indicatorsAsCol) {
+              let indicatorAtIndex = layoutMap.colDimensionKeys.indexOf(layoutMap.indicatorDimensionKey);
+              if (indicatorAtIndex === -1) {
+                indicatorAtIndex = layoutMap.columnHeaderLevelCount - 1;
+              }
+              if (row === indicatorAtIndex) {
+                const dimIndex = col - leftSnCount;
+                cellPathKeys = layoutMap.rowDimensionKeys.slice(0, dimIndex + 1);
+              } else {
+                const dimIndex = row;
+                cellPathKeys = layoutMap.colDimensionKeys.slice(0, dimIndex + 1);
+              }
+            } else {
+              let indicatorAtIndex = layoutMap.rowDimensionKeys.indexOf(layoutMap.indicatorDimensionKey);
+              if (indicatorAtIndex === -1) {
+                indicatorAtIndex = layoutMap.rowHeaderLevelCount - 1;
+              }
+              if (col - leftSnCount === indicatorAtIndex) {
+                const dimIndex = row;
+                cellPathKeys = layoutMap.colDimensionKeys.slice(0, dimIndex + 1);
+              } else {
+                const dimIndex = col - leftSnCount;
+                cellPathKeys = layoutMap.rowDimensionKeys.slice(0, dimIndex + 1);
+              }
+            }
+          }
+
+          if (cellPathKeys.length > 0 && dimensions.length === cellPathKeys.length) {
+            const isMatch = dimensions.every((dim, idx) => {
+              const isCorner = dim.isPivotCorner || (!isValid(dim.isPivotCorner) && dim.dimensionKey && !dim.value);
+              const keyMatch = dim.dimensionKey === cellPathKeys[idx] || dim.value === cellPathKeys[idx];
+              return isCorner && keyMatch;
+            });
+            if (isMatch) {
+              return pivotState.order;
+            }
+          }
+        }
+        continue;
+      }
+
       const cell = this.getCellAddressByHeaderPaths(dimensions);
-      // const { col: sortCol, row: sortRow, order } = this.pivotSortState[i];
       const order = pivotState.order;
 
       if (cell && cellInRange(cellRange, cell.col, cell.row)) {
@@ -1448,6 +1566,12 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
   _refreshHierarchyState(col: number, row: number, recalculateColWidths: boolean = true, beforeUpdateCell?: Function) {
     const oldFrozenColCount = this.frozenColCount;
     const oldFrozenRowCount = this.frozenRowCount;
+    const sizeTolerance = this.options.customConfig?._disableColumnAndRowSizeRound ? 1 : 0;
+    const getMaxScrollTop = () =>
+      Math.max(0, this.getAllRowsHeight() - (this.scenegraph?.height ?? this.tableNoFrameHeight) - sizeTolerance);
+    const oldMaxScrollTop = getMaxScrollTop();
+    const isScrollToBottom = oldMaxScrollTop > 0 && this.scrollTop >= oldMaxScrollTop - 1;
+    const oldScrollTop = this.scrollTop;
     const visibleStartRow = this.getBodyVisibleRowRange().rowStart;
     this.internalProps._oldRowCount = this.rowCount;
     this.internalProps._oldColCount = this.colCount;
@@ -1465,6 +1589,9 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
       }
     }
     const isChangeRowTree = this.internalProps.layoutMap.isRowHeader(col, row);
+    const oldHierarchyState = isChangeRowTree ? this.getHierarchyState(col, row) : undefined;
+    const shouldKeepBottomAfterToggle = isScrollToBottom && oldHierarchyState === 'expand';
+    const shouldKeepScrollAfterToggle = isChangeRowTree && !shouldKeepBottomAfterToggle;
     const result: {
       addCellPositionsRowDirection?: CellAddress[];
       removeCellPositionsRowDirection?: CellAddress[];
@@ -1522,9 +1649,28 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
       this.clearCellStyleCache();
       this.scenegraph.createSceneGraph();
       this.scrollToRow(visibleStartRow);
+      if (shouldKeepBottomAfterToggle) {
+        this.clearCorrectTimer();
+        this.setScrollTop(Number.MAX_SAFE_INTEGER);
+      } else if (shouldKeepScrollAfterToggle) {
+        this.clearCorrectTimer();
+        this.setScrollTop(oldScrollTop);
+      }
       // this.renderWithRecreateCells();
     }
     this.reactCustomLayout?.updateAllCustomCell();
+
+    if (shouldKeepBottomAfterToggle) {
+      this.clearCorrectTimer();
+      this.setScrollTop(Number.MAX_SAFE_INTEGER);
+    } else if (
+      shouldKeepScrollAfterToggle &&
+      this.rowHierarchyType !== 'grid-tree' &&
+      this.columnHierarchyType !== 'grid-tree'
+    ) {
+      this.clearCorrectTimer();
+      this.setScrollTop(oldScrollTop);
+    }
 
     if (checkHasChart) {
       // 检查更新节点状态后总宽高未撑满autoFill是否在起作用
@@ -1645,6 +1791,7 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
    * @param sort
    */
   setRecords(records: Array<any>): void {
+    this.stateManager.endResizeIfResizing();
     clearChartRenderQueue();
     const oldHoverState = { col: this.stateManager.hover.cellPos.col, row: this.stateManager.hover.cellPos.row };
     this.options.records = this.internalProps.records = records;
@@ -1720,9 +1867,28 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
     this.clearCellStyleCache();
     this.scenegraph.createSceneGraph();
     this.stateManager.updateHoverPos(oldHoverState.col, oldHoverState.row);
-    if (this.internalProps.title && !this.internalProps.title.isReleased) {
+    // if (this.internalProps.title && !this.internalProps.title.isReleased) {
+    //   this._updateSize();
+    //   this.internalProps.title.resize();
+    //   this.scenegraph.resize();
+    // }
+    let isHasComponent = false;
+    if (this.internalProps.title || this.internalProps.legends) {
       this._updateSize();
-      this.internalProps.title.resize();
+      isHasComponent = true;
+    }
+    // 组件布局优先级仅影响 title/legend 的布局与可用绘制区域缩减顺序
+    const layoutOrder = this.options.componentLayoutOrder ?? ['legend', 'title'];
+    layoutOrder.forEach(component => {
+      if (component === 'legend') {
+        this.internalProps.legends?.forEach(legend => {
+          legend?.resize();
+        });
+      } else if (component === 'title') {
+        this.internalProps.title?.resize();
+      }
+    });
+    if (isHasComponent) {
       this.scenegraph.resize();
     }
     this.eventManager.updateEventBinder();
@@ -1753,12 +1919,18 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
   completeEditCell() {
     this.editorManager.completeEdit();
   }
+  /** 取消编辑 */
+  cancelEditCell() {
+    this.editorManager.cancelEdit();
+  }
   /** 获取单元格对应的编辑器 */
   getEditor(col: number, row: number) {
     const lastSelectedCellEditor = this.editorManager.cacheLastSelectedCellEditor[`${col}-${row}`];
     if (lastSelectedCellEditor) {
       return lastSelectedCellEditor;
     }
+    Object.values(this.editorManager.cacheLastSelectedCellEditor).forEach((editor: IEditor) => editor?.onEnd?.());
+    this.editorManager.cacheLastSelectedCellEditor = {};
     let editor;
     if (this.isCornerHeader(col, row)) {
       const define = this.getHeaderDefine(col, row);
@@ -1783,8 +1955,9 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
     if (typeof editor === 'string') {
       editor = editors.get(editor);
     }
-    this.editorManager.cacheLastSelectedCellEditor = {};
-    this.editorManager.cacheLastSelectedCellEditor[`${col}-${row}`] = editor as IEditor;
+    if (editor) {
+      this.editorManager.cacheLastSelectedCellEditor[`${col}-${row}`] = editor as IEditor;
+    }
     return editor as IEditor;
   }
   /** 检查单元格是否定义过编辑器 不管编辑器是否有效 只要有定义就返回true */
@@ -1874,7 +2047,19 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
    * @param values 多个单元格的数据数组
    * @param workOnEditableCell 是否仅更改可编辑单元格
    */
-  changeCellValues(startCol: number, startRow: number, values: string[][], workOnEditableCell = false) {
+  changeCellValues(
+    startCol: number,
+    startRow: number,
+    values: (string | number)[][],
+    workOnEditableCell = false,
+    triggerEvent = true,
+    _noTriggerChangeCellValuesEvent?: boolean,
+    shouldCancel?: () => boolean
+  ): boolean[][] {
+    const changedCellResults: boolean[][] = [];
+    if (shouldCancel?.()) {
+      return changedCellResults;
+    }
     let pasteColEnd = startCol;
     let pasteRowEnd = startRow;
     // const rowCount = values.length;
@@ -1905,6 +2090,7 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
       if (startRow + i > this.rowCount - 1) {
         break;
       }
+      changedCellResults[i] = [];
       pasteRowEnd = startRow + i;
       const rowValues = values[i];
       let thisRowPasteColEnd = startCol;
@@ -1922,12 +2108,13 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
           let newValue: string | number = value;
           const oldValue = oldValues[i][j];
           const rawValue = beforeChangeValues[i][j];
-          if (typeof rawValue === 'number' && isAllDigits(value)) {
+          if (typeof rawValue === 'number' && typeof value === 'string' && isAllDigits(value)) {
             newValue = parseFloat(value);
           }
+          changedCellResults[i][j] = true;
           this._changeCellValueToDataSet(startCol + j, startRow + i, oldValue, newValue);
           const changedValue = this.getCellOriginValue(startCol + j, startRow + i);
-          if (changedValue !== oldValue) {
+          if (changedValue !== oldValue && triggerEvent) {
             this.fireListeners(TABLE_EVENT_TYPE.CHANGE_CELL_VALUE, {
               col: startCol + j,
               row: startRow + i,
@@ -1936,6 +2123,8 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
               changedValue
             });
           }
+        } else {
+          changedCellResults[i][j] = false;
         }
       }
       pasteColEnd = Math.max(pasteColEnd, thisRowPasteColEnd);
@@ -1994,6 +2183,7 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
     }
 
     this.scenegraph.updateNextFrame();
+    return changedCellResults;
   }
 
   private _changeCellValueToDataSet(col: number, row: number, oldValue: string | number, newValue: string | number) {
@@ -2019,25 +2209,39 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
             newValue
           );
       } else {
+        let indicatorPosition: { position: 'col' | 'row'; index?: number };
         const colKeys = cellDimensionPath.colHeaderPaths
           ?.filter((path: any) => {
             return !path.virtual;
           })
-          .map((colPath: any) => {
-            return colPath.indicatorKey ?? colPath.value;
+          .map((colPath: any, index: number) => {
+            if (colPath.indicatorKey) {
+              indicatorPosition = {
+                position: 'col',
+                index
+              };
+            }
+            return colPath.indicatorKey ?? colPath.dataValue ?? colPath.value;
           });
         const rowKeys = cellDimensionPath.rowHeaderPaths
           ?.filter((path: any) => {
             return !path.virtual;
           })
-          .map((rowPath: any) => {
-            return rowPath.indicatorKey ?? rowPath.value;
+          .map((rowPath: any, index: number) => {
+            if (rowPath.indicatorKey) {
+              indicatorPosition = {
+                position: 'row',
+                index
+              };
+            }
+            return rowPath.indicatorKey ?? rowPath.dataValue ?? rowPath.value;
           });
         this.dataset.changeTreeNodeValue(
-          !this.internalProps.layoutMap.indicatorsAsCol ? rowKeys.slice(0, -1) : rowKeys,
-          this.internalProps.layoutMap.indicatorsAsCol ? colKeys.slice(0, -1) : colKeys,
+          rowKeys,
+          colKeys,
           (this.internalProps.layoutMap as PivotHeaderLayoutMap).getIndicatorKey(col, row),
-          newValue
+          newValue,
+          indicatorPosition
         );
       }
     } else if (this.flatDataToObjects) {
@@ -2058,10 +2262,10 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
           );
       } else {
         const colKeys = cellDimensionPath.colHeaderPaths.map((colPath: any) => {
-          return colPath.indicatorKey ?? colPath.value;
+          return colPath.indicatorKey ?? colPath.dataValue ?? colPath.value;
         });
         const rowKeys = cellDimensionPath.rowHeaderPaths.map((rowPath: any) => {
-          return rowPath.indicatorKey ?? rowPath.value;
+          return rowPath.indicatorKey ?? rowPath.dataValue ?? rowPath.value;
         });
         this.flatDataToObjects.changeTreeNodeValue(
           rowKeys,
@@ -2163,6 +2367,8 @@ export class PivotTable extends BaseTable implements PivotTableAPI {
     if (isResetTree) {
       // 由于筛选数据可能导致行列变化，所以需要重置树结构
       this.dataset.updateFilterRules(filterRules, true);
+      // 筛选后dataset重新生成了树结构，需要重新过滤hide指标节点
+      this._filterHideIndicatorNode();
       this.internalProps.layoutMap.resetHeaderTree();
     } else {
       this.dataset.updateFilterRules(filterRules);

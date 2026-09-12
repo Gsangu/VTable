@@ -116,6 +116,11 @@ describe('FormulaEngine', () => {
       });
     });
 
+    test('应该正确处理函数参数中的算术表达式与尾部算术', () => {
+      expect(engine.calculateFormula('=SUM(1, SUM(1,1)+1) + 1')).toEqual({ value: 5, error: undefined });
+      expect(engine.calculateFormula('=sum(1, sum(1,1)+1) + 1')).toEqual({ value: 5, error: undefined });
+    });
+
     test('应该正确处理复杂嵌套函数', () => {
       const complexFormula = '=IF(SUM(A1:A3)>10,AVERAGE(B1:B3),MAX(C1:C3))';
       expect(engine.calculateFormula(complexFormula)).toEqual({ value: 5, error: undefined });
@@ -215,6 +220,10 @@ describe('FormulaEngine', () => {
         value: null,
         error: 'Basic arithmetic evaluation failed'
       });
+      expect(engine.calculateFormula('=1+ +1')).toEqual({
+        value: 2,
+        error: undefined
+      });
     });
 
     test('应该正确处理除以零', () => {
@@ -229,6 +238,7 @@ describe('FormulaEngine', () => {
     test('应该正确验证有效公式', () => {
       expect(engine.validateFormula('=SUM(1,2,3)')).toEqual({ isValid: true, error: undefined });
       expect(engine.validateFormula('=A1+B1')).toEqual({ isValid: true, error: undefined });
+      expect(engine.validateFormula('=1+ +1')).toEqual({ isValid: true, error: undefined });
       expect(engine.validateFormula('=IF(1>0,1,0)')).toEqual({ isValid: true, error: undefined });
     });
 

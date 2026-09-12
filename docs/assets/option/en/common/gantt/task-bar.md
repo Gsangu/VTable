@@ -171,6 +171,12 @@ Whether the service clause is optional, the default is true
 
 Not required
 
+${prefix} locateIcon(boolean) = false
+
+When the task bar is horizontally outside the current viewport, show a “locate icon” at the left/right edge of the gantt view. Hover highlights the icon, and click scrolls the task bar into the viewport.
+
+Optional
+
 ${prefix} scheduleCreatable(boolean | Function) = true
 
 When there is no scheduling data, scheduling can be done by creating a task bar. When `tasksShowMode` is `TasksShowMode.Tasks_Separate` or `TasksShowMode.Sub_Tasks_Separate`, `scheduleCreatable` defaults to `true`, otherwise, when `tasksShowMode` is `TasksShowMode.Sub_Tasks_Inline`, `TasksShowMode.Sub_Tasks_Arrange`, or `TasksShowMode.Sub_Tasks_Compact`, `scheduleCreatable` defaults to `false`.
@@ -234,5 +240,36 @@ Optional
 ${prefix} clip(boolean)
 
 Whether to crop out the part that overflows the taskBar, the default is true
+
+Optional
+
+${prefix} baselineStartDateField(string)
+
+Data field name for the baseline start date. Used to draw the starting position of the "baseline bar". Not set by default; when set, it should match a field in records such as `baselineStartDate`.
+
+Optional
+
+${prefix} baselineEndDateField(string)
+
+Data field name for the baseline end date. Used to draw the ending position of the "baseline bar". Not set by default; when set, it should match a field in records such as `baselineEndDate`.
+
+Optional
+
+${prefix} baselineStyle(ITaskBarStyle | Function)
+
+Baseline bar style, supports the same style fields as `barStyle`. You can also configure a function to return styles per task. The default is `{ barColor: '#d3d3d3', completedBarColor: '#a9a9a9', width: 20, cornerRadius: 3, borderWidth: 0 }`.
+
+```
+baselineStyle?: ITaskBarStyle | ((args: TaskBarInteractionArgumentType) => ITaskBarStyle);
+```
+
+Optional
+
+${prefix} baselinePosition('top' | 'bottom' | 'overlap') = 'bottom'
+
+Vertical position of the baseline bar relative to the main task bar:
+- `top`: baseline above the task bar;
+- `bottom`: baseline below the task bar;
+- `overlap`: baseline overlaps and is centered with the task bar.
 
 Optional
