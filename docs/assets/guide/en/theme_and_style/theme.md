@@ -1198,3 +1198,34 @@ const tableInstance = new VTable.PivotTable(option);
 ```
 
 In short, in VTable, by flexibly using Theme configuration items, we can easily create an exclusive data table style that meets our needs. Please refer to this tutorial to make reasonable configurations based on actual scenarios, and give full play to VTable's powerful Theme customization capabilities.
+
+## Set the default theme
+
+Use `VTable.themes.setDefaultTheme(theme)` during application or component-library initialization to configure the theme used when a table has no explicit `theme`. This applies to ListTable, PivotTable and PivotChart.
+
+```javascript
+const originalDefault = VTable.themes.DEFAULT;
+VTable.themes.setDefaultTheme(
+  originalDefault.extends({
+    defaultStyle: { fontFamily: 'Arial, sans-serif' },
+    bodyStyle: { color: '#243447' },
+    headerStyle: { bgColor: '#f2f4f7' }
+  })
+);
+
+// Uses the configured default without specifying option.theme.
+const table = new VTable.ListTable({ container, columns, records });
+
+// Extends the configured default using the existing theme API.
+const customTheme = VTable.themes.DEFAULT.extends({ headerStyle: { color: '#345678' } });
+
+// Restore the original default for subsequent operations.
+VTable.themes.setDefaultTheme(originalDefault);
+```
+
+The argument is an `ITableThemeDefine` object or a `TableTheme`. It **replaces** the previous default; use `themes.DEFAULT.extends(...)` explicitly to merge with the current default. The function returns `void`.
+
+- `themes.DEFAULT`, the internal default fallback and the built-in `DEFAULT` name resolve to the new theme. User-registered names retain their existing lookup priority, including a user registration named `DEFAULT`.
+- Existing instances and themes created earlier with `extends()` retain their theme objects and are not automatically redrawn. A later `updateOption()` without `theme` uses the current default. Use `table.updateTheme(VTable.themes.DEFAULT)` to explicitly apply it to an existing instance.
+- Explicit instance themes, other built-in themes, theme registration and `updateTheme()` keep their existing behavior. Standalone partial themes do not inherit the configured default; use `extends()` when inheritance is intended.
+- The setting is shared by callers using the same VTable runtime. Configure it before creating tables. It is not an instance-scoped setting or a mechanism for automatically switching all existing tables.

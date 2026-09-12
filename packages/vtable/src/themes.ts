@@ -11,7 +11,7 @@ import type { ITableThemeDefine } from './ts-types';
 export const DARK = new TableTheme(darkTheme, darkTheme);
 export const BRIGHT = new TableTheme(brightTheme, brightTheme);
 export const ARCO = new TableTheme(arcoTheme, arcoTheme);
-export const DEFAULT = new TableTheme(defaultTheme, defaultTheme);
+export let DEFAULT = new TableTheme(defaultTheme, defaultTheme);
 export const SIMPLIFY = new TableTheme(materialDesignTheme, materialDesignTheme);
 
 const builtin: { [key: string]: TableTheme } = {
@@ -21,7 +21,16 @@ const builtin: { [key: string]: TableTheme } = {
   DARK,
   BRIGHT
 };
-// let defTheme = DEFAULT;
+/**
+ * Replace the default theme used when no instance theme is specified.
+ * Existing instances and previously extended themes are not updated.
+ * The supplied theme replaces the default; use DEFAULT.extends() to merge styles.
+ */
+export function setDefaultTheme(theme: ITableThemeDefine): void {
+  DEFAULT = theme instanceof TableTheme ? theme.extends({}) : new TableTheme(theme, theme);
+  builtin.DEFAULT = DEFAULT;
+}
+
 export const theme = { TableTheme };
 export function of(value: ITableThemeDefine | string | undefined | null): TableTheme | null {
   if (!value) {
@@ -52,9 +61,12 @@ export default {
   DARK,
   BRIGHT,
   ARCO,
-  DEFAULT,
+  get DEFAULT() {
+    return DEFAULT;
+  },
   SIMPLIFY,
   theme,
   of,
-  get
+  get,
+  setDefaultTheme
 };

@@ -1,3 +1,23 @@
+# v1.26.8
+
+2026-09-11
+
+**🆕 新增功能**
+
+- **@visactor/vtable**: 新增 `themes.setDefaultTheme`，支持配置应用级默认主题样式
+
+**🐛 问题修复**
+
+- **@visactor/vtable**: 阻止空图片、音频和视频单元格打开媒体预览（GitHub #5290）
+- **@visactor/vtable**: 支持按路径更新嵌套字段
+- **@visactor/vtable**: 复制和剪切时优先使用事件的剪贴板数据；异步 Clipboard API 不可用时为粘贴提供回退；粘贴成功前保留剪切源单元格，并规范化粘贴的 HTML 单元格内容（GitHub #5274）
+- **@visactor/vtable**: 调用 `updateOption` 后保留透视表列宽（#5298）
+- **@visactor/vtable-sheet**: 修复编译配置，避免将仅用于测试的插件源码纳入包编译
+
+**完整更新日志**: https://github.com/VisActor/VTable/compare/v1.26.7...v1.26.8
+
+[更多详情请查看 v1.26.8](https://github.com/VisActor/VTable/releases/tag/v1.26.8)
+
 # v1.26.7
 
 2026-08-20
@@ -5,17 +25,17 @@
 **🆕 新增功能**
 
 - **@visactor/vtable**: 支持配置 Tooltip 展示延迟
-- **@visactor/vtable**: 新增音频单元格类型支持（GitHub #5271）
+- **@visactor/vtable**: 新增音频单元格类型支持 [#5271](https://github.com/VisActor/VTable/issues/5271)
 
 **🐛 问题修复**
 
-- **@visactor/vtable**: 通过保留足够的虚拟行，避免大范围合并单元格在自动行高下滚动出现空白（GitHub #3752）
-- **@visactor/vtable**: 行拖拽重排后保持树形 checkbox 状态（GitHub #3975）
-- **@visactor/vtable**: 新增右键菜单点击事件类型定义（GitHub #4655）
-- **@visactor/vtable**: customRender 自动尺寸计算时避免加载全部懒加载 dataSource 记录（GitHub #4964）
+- **@visactor/vtable**: 通过保留足够的虚拟行，避免大范围合并单元格在自动行高下滚动出现空白 [#3752](https://github.com/VisActor/VTable/issues/3752)
+- **@visactor/vtable**: 行拖拽重排后保持树形 checkbox 状态 [#3975](https://github.com/VisActor/VTable/issues/3975)
+- **@visactor/vtable**: 新增右键菜单点击事件类型定义 [#4655](https://github.com/VisActor/VTable/issues/4655)
+- **@visactor/vtable**: customRender 自动尺寸计算时避免加载全部懒加载 dataSource 记录 [#4964](https://github.com/VisActor/VTable/issues/4964)
 - **@visactor/vtable**: 支持在顶部冻结行中渲染 Vue 组件
-- **@visactor/vtable**: 短数据且存在底部冻结行时，表格外框边框与内容高度对齐（GitHub #5277）
-- **@visactor/vtable**: 在滚动边界调用 setRecords 后保持表头显示（GitHub #5278）
+- **@visactor/vtable**: 短数据且存在底部冻结行时，表格外框边框与内容高度对齐 [#5277](https://github.com/VisActor/VTable/issues/5277)
+- **@visactor/vtable**: 在滚动边界调用 setRecords 后保持表头显示 [#5278](https://github.com/VisActor/VTable/issues/5278)
 
 **完整更新日志**: https://github.com/VisActor/VTable/compare/v1.26.6...v1.26.7
 

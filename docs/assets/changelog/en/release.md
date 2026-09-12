@@ -1,3 +1,23 @@
+# v1.26.8
+
+2026-09-11
+
+**🆕 New Features**
+
+- **@visactor/vtable**: add themes.setDefaultTheme for application-wide default styling
+
+**🐛 Bug Fixes**
+
+- **@visactor/vtable**: prevent empty image, audio, and video cells from opening media previews (GitHub #5290)
+- **@visactor/vtable**: update nested fields by path
+- **@visactor/vtable**: prefer event clipboard data for copy and cut, fall back to it for paste when the async Clipboard API is unavailable, preserve cut source cells until paste succeeds, and normalize pasted HTML cell content (GitHub #5274)
+- **@visactor/vtable**: preserve pivot table column widths after updateOption (#5298)
+- **@visactor/vtable-sheet**: keep test-only plugin sources out of the package compile
+
+**Full Changelog**: https://github.com/VisActor/VTable/compare/v1.26.7...v1.26.8
+
+[more detail about v1.26.8](https://github.com/VisActor/VTable/releases/tag/v1.26.8)
+
 # v1.26.7
 
 2026-08-20
@@ -5,17 +25,17 @@
 **🆕 New Features**
 
 - **@visactor/vtable**: support tooltip appear delay
-- **@visactor/vtable**: add audio cell type support (GitHub #5271)
+- **@visactor/vtable**: add audio cell type support [#5271](https://github.com/VisActor/VTable/issues/5271)
 
 **🐛 Bug Fixes**
 
-- **@visactor/vtable**: prevent blank scrolling for large merged auto-height cells by keeping enough virtual rows (GitHub #3752)
-- **@visactor/vtable**: preserve tree checkbox state after row drag reorder (GitHub #3975)
-- **@visactor/vtable**: add context menu click event typing (GitHub #4655)
-- **@visactor/vtable**: avoid loading all lazy dataSource records during customRender auto size computation (GitHub #4964)
+- **@visactor/vtable**: prevent blank scrolling for large merged auto-height cells by keeping enough virtual rows [#3752](https://github.com/VisActor/VTable/issues/3752)
+- **@visactor/vtable**: preserve tree checkbox state after row drag reorder [#3975](https://github.com/VisActor/VTable/issues/3975)
+- **@visactor/vtable**: add context menu click event typing [#4655](https://github.com/VisActor/VTable/issues/4655)
+- **@visactor/vtable**: avoid loading all lazy dataSource records during customRender auto size computation [#4964](https://github.com/VisActor/VTable/issues/4964)
 - **@visactor/vtable**: render vue components in top frozen rows
-- **@visactor/vtable**: align frame border with short frozen rows (GitHub #5277)
-- **@visactor/vtable**: keep headers after setRecords at scroll edge (GitHub #5278)
+- **@visactor/vtable**: align frame border with short frozen rows [#5277](https://github.com/VisActor/VTable/issues/5277)
+- **@visactor/vtable**: keep headers after setRecords at scroll edge [#5278](https://github.com/VisActor/VTable/issues/5278)
 
 **Full Changelog**: https://github.com/VisActor/VTable/compare/v1.26.6...v1.26.7
 
